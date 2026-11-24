@@ -653,6 +653,7 @@ mod avx512_5b {
 pub enum HashMode5b {
     Pow2,
     Div3,
+    MulShift384,
     Hash128,
 }
 
@@ -678,34 +679,58 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
     pub const META_REST_BYTES: usize = Self::OV_CAP + Self::MASK_BYTES;
     pub const BLOCK_BYTES: usize = 1 + Self::SLOT_BYTES + Self::META_REST_BYTES;
     const FLAG_HASH128: u8 = 4;
+    const FLAG_MULSHIFT384: u8 = 8;
 
     #[inline(always)]
     fn calc_sentinel(p_blk: u32, mode: HashMode5b) -> u64 {
         match mode {
             HashMode5b::Pow2 => 1u64 << (p_blk + G.trailing_zeros() - 1),
             HashMode5b::Div3 => 1u64 << (7 + p_blk - 1),
+            HashMode5b::MulShift384 => 1u64 << (25 + p_blk - 1),
             HashMode5b::Hash128 => 0,
         }
     }
 
+    #[inline(always)]
+    fn header_kind_and_flags(mode: HashMode5b) -> (u8, u8) {
+        let kind = match (G, K, HAS_MASK, mode) {
+            (512, 24, false, HashMode5b::Pow2 | HashMode5b::Hash128) => 10,
+            (512, 20, true, HashMode5b::Pow2 | HashMode5b::Hash128) => 11,
+            (384, 16, false, HashMode5b::Div3 | HashMode5b::MulShift384 | HashMode5b::Hash128) => 12,
+            (128, 8, false, HashMode5b::Pow2 | HashMode5b::Hash128) => 13,
+            _ => 19,
+        };
+        let flags = (if HAS_MASK { 2 } else { 0 })
+            | (if mode == HashMode5b::Hash128 { Self::FLAG_HASH128 } else { 0 })
+            | (if mode == HashMode5b::MulShift384 { Self::FLAG_MULSHIFT384 } else { 0 });
+        (kind, flags)
+    }
+
+    #[inline(always)]
+    fn expected_header_u64(n_blk: usize, mode: HashMode5b) -> u64 {
+        let p_blk = n_blk.trailing_zeros();
+        let (kind, flags) = Self::header_kind_and_flags(mode);
+        let aux = ((G as u32) << 16) | ((K as u32) << 8) | (8u32 << 4) | 2u32;
+        SketchHeader::new(kind, p_blk as u8, flags, aux).to_u64()
+    }
+
     pub fn new(n_blk: usize, mode: HashMode5b) -> Self {
+        assert!(K >= 2 && Self::OV_CAP >= 1, "packed OsBmw5bInPlace requires K >= 2 (OV_CAP >= 1)");
         assert!(n_blk >= 1 && n_blk.is_power_of_two() && n_blk <= (1 << 20));
         assert_eq!((G * 5) % 8, 0);
         assert_eq!(G % 64, 0, "G must be multiple of 64 for AVX-512 64-lane vectorization");
         if HAS_MASK {
             assert!(G <= 512);
         }
+        match mode {
+            HashMode5b::Pow2 => assert!(G.is_power_of_two(), "HashMode5b::Pow2 requires power-of-two G"),
+            HashMode5b::Div3 | HashMode5b::MulShift384 => assert_eq!(G, 384, "Div3/MulShift384 modes require G=384"),
+            HashMode5b::Hash128 => {}
+        }
         let p_blk = n_blk.trailing_zeros();
         let total = HEADER_BYTES + n_blk * Self::BLOCK_BYTES;
         let mut buf = vec![0u8; total];
-        let kind = match (G, K, HAS_MASK, mode) {
-            (512, 24, false, HashMode5b::Pow2 | HashMode5b::Hash128) => 10,
-            (512, 20, true, HashMode5b::Pow2 | HashMode5b::Hash128) => 11,
-            (384, 16, false, HashMode5b::Div3 | HashMode5b::Hash128) => 12,
-            (128, 8, false, HashMode5b::Pow2 | HashMode5b::Hash128) => 13,
-            _ => 19,
-        };
-        let flags = (if HAS_MASK { 2 } else { 0 }) | (if mode == HashMode5b::Hash128 { Self::FLAG_HASH128 } else { 0 });
+        let (kind, flags) = Self::header_kind_and_flags(mode);
         let aux = ((G as u32) << 16) | ((K as u32) << 8) | (8u32 << 4) | 2u32;
         let hdr = SketchHeader::new(kind, p_blk as u8, flags, aux);
         buf[0..8].copy_from_slice(&hdr.to_u64().to_le_bytes());
@@ -720,22 +745,23 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
     }
 
     pub fn from_bytes(bytes: &[u8], mode: HashMode5b) -> Result<Self, String> {
+        if K < 2 || Self::OV_CAP == 0 {
+            return Err("packed OsBmw5bInPlace requires K >= 2 (OV_CAP >= 1)".to_string());
+        }
         if bytes.len() < HEADER_BYTES {
             return Err("buffer shorter than 8B header".to_string());
+        }
+        if matches!(mode, HashMode5b::Pow2) && !G.is_power_of_two() {
+            return Err("Pow2 mode requires power-of-two G".to_string());
+        }
+        if matches!(mode, HashMode5b::Div3 | HashMode5b::MulShift384) && G != 384 {
+            return Err("Div3/MulShift384 modes require G=384".to_string());
         }
         let hdr = SketchHeader::from_u64(u64::from_le_bytes(bytes[0..8].try_into().unwrap()));
         if hdr.magic != SketchHeader::MAGIC {
             return Err("bad header magic".to_string());
         }
-        let expected_kind = match (G, K, HAS_MASK, mode) {
-            (512, 24, false, HashMode5b::Pow2 | HashMode5b::Hash128) => 10,
-            (512, 20, true, HashMode5b::Pow2 | HashMode5b::Hash128) => 11,
-            (384, 16, false, HashMode5b::Div3 | HashMode5b::Hash128) => 12,
-            (128, 8, false, HashMode5b::Pow2 | HashMode5b::Hash128) => 13,
-            _ => 19,
-        };
-        let expected_flags = (if HAS_MASK { 2 } else { 0 })
-            | (if mode == HashMode5b::Hash128 { Self::FLAG_HASH128 } else { 0 });
+        let (expected_kind, expected_flags) = Self::header_kind_and_flags(mode);
         let expected_aux = ((G as u32) << 16) | ((K as u32) << 8) | (8u32 << 4) | 2u32;
         if hdr.kind != expected_kind {
             return Err(format!("header kind {} != expected {}", hdr.kind, expected_kind));
@@ -747,6 +773,9 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
             return Err(format!("header aux 0x{:08x} != expected 0x{:08x}", hdr.aux, expected_aux));
         }
         let p_blk = hdr.p_or_k as u32;
+        if p_blk > 20 {
+            return Err(format!("p_blk={} exceeds max 20", p_blk));
+        }
         let n_blk = 1usize << p_blk;
         let expected = HEADER_BYTES + n_blk * Self::BLOCK_BYTES;
         if bytes.len() != expected {
@@ -787,6 +816,7 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
                 DistSpec::Pow2 { w_bits: 64 - self.p_blk - s_sub, max_cap: 63 }
             }
             HashMode5b::Div3 => DistSpec::Pow2Div3 { p_tot: 7 + self.p_blk },
+            HashMode5b::MulShift384 => DistSpec::Pow2 { w_bits: 64 - 25 - self.p_blk, max_cap: 63 },
             HashMode5b::Hash128 => DistSpec::Pow2 { w_bits: 64, max_cap: 63 },
         }
     }
@@ -841,6 +871,9 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
                 let lvl = (q | self.sentinel).leading_zeros() as u8;
                 (blk, sub, lvl)
             }
+            HashMode5b::MulShift384 => {
+                return self.add_hash_64_mulshift384(h);
+            }
             HashMode5b::Hash128 => {
                 panic!("OsBmw5bInPlace::add_hash_64 called on HashMode5b::Hash128 sketch; use add_hash_128");
             }
@@ -890,6 +923,11 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
     /// Bit-for-bit identical to `HashMode5b::Div3` (`add_hash_64`).
     #[inline(always)]
     pub fn add_hash_64_div3_mulshift_deferred(&mut self, h: u64) -> bool {
+        assert_eq!(
+            self.mode,
+            HashMode5b::Div3,
+            "add_hash_64_div3_mulshift_deferred requires HashMode5b::Div3"
+        );
         let hc = h.wrapping_sub((h == u64::MAX) as u64);
         let q = ((hc as u128).wrapping_mul(0xAAAA_AAAA_AAAA_AAABu128) >> 65) as u64;
         let blk = ((q >> 7) as usize) & self.blk_mask;
@@ -909,9 +947,13 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
     /// `r3 = (((h & 0x3_FFFF) * 3) >> 18)` (bias < 3.8e-6) + `sub128` run only on non-exiting updates.
     #[inline(always)]
     pub fn add_hash_64_mulshift384(&mut self, h: u64) -> bool {
+        assert_eq!(
+            self.mode,
+            HashMode5b::MulShift384,
+            "add_hash_64_mulshift384 requires HashMode5b::MulShift384"
+        );
         let blk = ((h >> 25) as usize) & self.blk_mask;
-        let sent = 1u64 << (25 + self.p_blk - 1);
-        let lvl = ((h | sent).leading_zeros() + 1) as u8;
+        let lvl = ((h | self.sentinel).leading_zeros() + 1) as u8;
         let anchor = unsafe { *self.buf.get_unchecked(HEADER_BYTES + blk) };
         if lvl.wrapping_add(8) <= anchor {
             return true;
@@ -937,6 +979,52 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
             return true;
         }
         self.add_level_non_ee(blk, sub, lvl, anchor)
+    }
+
+    /// Read-only diagnostic classifier for W7 root-cause profiling (0=EE, 1=normal_lut, 2=existing_ov, 3=ov_insert, 4=reanchor).
+    pub fn classify_hash_64(&self, h: u64) -> u8 {
+        let (blk, sub, lvl) = match self.mode {
+            HashMode5b::Pow2 => {
+                let sub = (h as usize) & (G - 1);
+                let blk = ((h >> G.trailing_zeros()) as usize) & self.blk_mask;
+                let lvl = ((h | self.sentinel).leading_zeros() + 1) as u8;
+                (blk, sub, lvl)
+            }
+            HashMode5b::Div3 => {
+                let hc = if h == u64::MAX { h - 1 } else { h };
+                let q = hc / 3;
+                let r3 = (hc - q * 3) as usize;
+                let sub = r3 * 128 + ((q & 127) as usize);
+                let blk = ((q >> 7) as usize) & self.blk_mask;
+                let lvl = (q | self.sentinel).leading_zeros() as u8;
+                (blk, sub, lvl)
+            }
+            HashMode5b::MulShift384 => {
+                let blk = ((h >> 25) as usize) & self.blk_mask;
+                let lvl = ((h | self.sentinel).leading_zeros() + 1) as u8;
+                let r3 = (((h & 0x3_FFFF).wrapping_mul(3)) >> 18) as usize;
+                let sub = (r3 << 7) | (((h >> 18) as usize) & 127);
+                (blk, sub, lvl)
+            }
+            HashMode5b::Hash128 => return 255,
+        };
+        let anchor = self.buf[HEADER_BYTES + blk];
+        if lvl.wrapping_add(8) <= anchor {
+            return 0;
+        }
+        let code = unsafe { read_slot_5b(self.buf.as_ptr().add(self.slots_base(blk)), sub) };
+        if code == SENTINEL_5B {
+            return 2;
+        }
+        if lvl <= anchor {
+            return 1;
+        }
+        let meta_base = self.meta_rest_base(blk);
+        if self.buf[meta_base + Self::OV_CAP - 1] == 0 {
+            3
+        } else {
+            4
+        }
     }
 
     #[cold]
@@ -1057,12 +1145,41 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
     }
 
     #[inline]
-    pub fn unpack_block_u8(&self, blk: usize, out: &mut [u8; G]) {
+    pub fn unpack_block_u8_scalar(&self, blk: usize, out: &mut [u8; G]) {
         let anchor = self.buf[HEADER_BYTES + blk];
         let slot_base = self.slots_base(blk);
         let meta_base = self.meta_rest_base(blk);
         let ovs = &self.buf[meta_base..meta_base + Self::OV_CAP];
+        let base_lo_shift = (anchor - 8) << 2;
+        let slots = &self.buf[slot_base..slot_base + Self::SLOT_BYTES];
+        let mut ov_idx = 0usize;
+        let mut r = 0usize;
+        let mut bp = 0usize;
+        while r < G {
+            let w: u64 = (slots[bp] as u64)
+                | ((slots[bp + 1] as u64) << 8)
+                | ((slots[bp + 2] as u64) << 16)
+                | ((slots[bp + 3] as u64) << 24)
+                | ((slots[bp + 4] as u64) << 32);
+            for j in 0..8 {
+                let c = ((w >> (j * 5)) & 31) as usize;
+                out[r + j] = if c == 0 {
+                    0u8
+                } else if c == SENTINEL_5B as usize {
+                    let ov = ovs[ov_idx];
+                    ov_idx += 1;
+                    ov
+                } else {
+                    base_lo_shift + CODE_TO_REL_U8_64.0[c]
+                };
+            }
+            r += 8;
+            bp += 5;
+        }
+    }
 
+    #[inline]
+    pub fn unpack_block_u8(&self, blk: usize, out: &mut [u8; G]) {
         #[cfg(all(
             target_arch = "x86_64",
             target_feature = "avx512bw",
@@ -1070,39 +1187,16 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
             target_feature = "avx512vbmi2"
         ))]
         unsafe {
+            let anchor = self.buf[HEADER_BYTES + blk];
+            let slot_base = self.slots_base(blk);
+            let meta_base = self.meta_rest_base(blk);
+            let ovs = &self.buf[meta_base..meta_base + Self::OV_CAP];
             avx512_5b::unpack_block_avx512::<G, K>(anchor, self.buf.as_ptr().add(slot_base), ovs, out);
             return;
         }
 
         #[allow(unreachable_code)]
-        {
-            let base_lo_shift = (anchor - 8) << 2;
-            let slots = &self.buf[slot_base..slot_base + Self::SLOT_BYTES];
-            let mut ov_idx = 0usize;
-            let mut r = 0usize;
-            let mut bp = 0usize;
-            while r < G {
-                let w: u64 = (slots[bp] as u64)
-                    | ((slots[bp + 1] as u64) << 8)
-                    | ((slots[bp + 2] as u64) << 16)
-                    | ((slots[bp + 3] as u64) << 24)
-                    | ((slots[bp + 4] as u64) << 32);
-                for j in 0..8 {
-                    let c = ((w >> (j * 5)) & 31) as usize;
-                    out[r + j] = if c == 0 {
-                        0u8
-                    } else if c == SENTINEL_5B as usize {
-                        let ov = ovs[ov_idx];
-                        ov_idx += 1;
-                        ov
-                    } else {
-                        base_lo_shift + CODE_TO_REL_U8_64.0[c]
-                    };
-                }
-                r += 8;
-                bp += 5;
-            }
-        }
+        self.unpack_block_u8_scalar(blk, out);
     }
 
     #[inline]
@@ -1266,13 +1360,33 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
             {
                 let mut u_a = [0u8; G];
                 let mut u_b = [0u8; G];
-                self.unpack_block_u8(blk, &mut u_a);
-                other.unpack_block_u8(blk, &mut u_b);
+                self.unpack_block_u8_scalar(blk, &mut u_a);
+                other.unpack_block_u8_scalar(blk, &mut u_b);
                 for r in 0..G {
                     u_a[r] = merge_ull_u8(u_a[r], u_b[r]);
                 }
                 self.pack_block_u8(blk, &u_a, a1.max(a2));
             }
+        }
+        Ok(())
+    }
+
+    /// Always-scalar reference merge (`self |= other`) bypassing all AVX-512 paths (for direct byte-parity audits).
+    pub fn merge_in_place_scalar(&mut self, other: &Self) -> Result<(), String> {
+        if self.n_blk != other.n_blk || self.mode != other.mode || self.buf[0..8] != other.buf[0..8] {
+            return Err("OsBmw5bInPlace::merge_in_place_scalar header/geometry mismatch".to_string());
+        }
+        for blk in 0..self.n_blk {
+            let a1 = self.buf[HEADER_BYTES + blk];
+            let a2 = other.buf[HEADER_BYTES + blk];
+            let mut u_a = [0u8; G];
+            let mut u_b = [0u8; G];
+            self.unpack_block_u8_scalar(blk, &mut u_a);
+            other.unpack_block_u8_scalar(blk, &mut u_b);
+            for r in 0..G {
+                u_a[r] = merge_ull_u8(u_a[r], u_b[r]);
+            }
+            self.pack_block_u8(blk, &u_a, a1.max(a2));
         }
         Ok(())
     }
@@ -1304,6 +1418,7 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
                 (w_bits as usize + 1).min(63) as u8
             }
             HashMode5b::Div3 => (64 - (7 + self.p_blk)) as u8,
+            HashMode5b::MulShift384 => (64 - 25 - self.p_blk + 1).min(63) as u8,
             HashMode5b::Hash128 => unreachable!(),
         };
         let can_lift = top_lvl < 63;
@@ -1388,20 +1503,17 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
 
     #[inline]
     pub fn init_flat_slice(dst: &mut [u8], n_blk: usize, mode: HashMode5b) {
-        debug_assert_eq!(dst.len(), Self::state_bytes_for(n_blk));
+        assert!(K >= 2 && Self::OV_CAP >= 1, "packed OsBmw5bInPlace requires K >= 2 (OV_CAP >= 1)");
+        assert!(n_blk >= 1 && n_blk.is_power_of_two() && n_blk.trailing_zeros() <= 20);
+        assert_eq!(dst.len(), Self::state_bytes_for(n_blk), "init_flat_slice: buffer length mismatch");
+        match mode {
+            HashMode5b::Pow2 => assert!(G.is_power_of_two(), "HashMode5b::Pow2 requires power-of-two G"),
+            HashMode5b::Div3 | HashMode5b::MulShift384 => assert_eq!(G, 384, "Div3/MulShift384 modes require G=384"),
+            HashMode5b::Hash128 => {}
+        }
         dst.fill(0);
-        let p_blk = n_blk.trailing_zeros();
-        let kind = match (G, K, HAS_MASK, mode) {
-            (512, 24, false, HashMode5b::Pow2 | HashMode5b::Hash128) => 10,
-            (512, 20, true, HashMode5b::Pow2 | HashMode5b::Hash128) => 11,
-            (384, 16, false, HashMode5b::Div3 | HashMode5b::Hash128) => 12,
-            (128, 8, false, HashMode5b::Pow2 | HashMode5b::Hash128) => 13,
-            _ => 19,
-        };
-        let flags = (if HAS_MASK { 2 } else { 0 }) | (if mode == HashMode5b::Hash128 { Self::FLAG_HASH128 } else { 0 });
-        let aux = ((G as u32) << 16) | ((K as u32) << 8) | (8u32 << 4) | 2u32;
-        let hdr = SketchHeader::new(kind, p_blk as u8, flags, aux);
-        dst[0..8].copy_from_slice(&hdr.to_u64().to_le_bytes());
+        let exp_hdr = Self::expected_header_u64(n_blk, mode);
+        dst[0..8].copy_from_slice(&exp_hdr.to_le_bytes());
         dst[HEADER_BYTES..HEADER_BYTES + n_blk].fill(ANCHOR_INIT);
     }
 
@@ -1425,6 +1537,14 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
                 let blk = ((q >> 7) as usize) & blk_mask;
                 let sentinel = 1u64 << (7 + p_blk - 1);
                 let lvl = (q | sentinel).leading_zeros() as u8;
+                (blk, sub, lvl)
+            }
+            HashMode5b::MulShift384 => {
+                let blk = ((h >> 25) as usize) & blk_mask;
+                let sentinel = 1u64 << (25 + p_blk - 1);
+                let lvl = ((h | sentinel).leading_zeros() + 1) as u8;
+                let r3 = (((h & 0x3_FFFF).wrapping_mul(3)) >> 18) as usize;
+                let sub = (r3 << 7) | (((h >> 18) as usize) & 127);
                 (blk, sub, lvl)
             }
             HashMode5b::Hash128 => panic!("decompose_hash_64 called on Hash128"),
@@ -1462,10 +1582,41 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
         }
     }
 
+    /// Bounds-checked safe flat-slice level update (`R-22` hardening).
     #[inline(always)]
     pub fn add_level_flat_slice(buf: &mut [u8], n_blk: usize, blk: usize, sub: usize, lvl: u8) -> bool {
-        debug_assert!(blk < n_blk && sub < G && lvl >= 1 && lvl <= 63);
-        let anchor = unsafe { *buf.get_unchecked(HEADER_BYTES + blk) };
+        assert!(K >= 2 && Self::OV_CAP >= 1, "packed OsBmw5bInPlace requires K >= 2 (OV_CAP >= 1)");
+        assert!(
+            n_blk >= 1 && n_blk.is_power_of_two() && n_blk.trailing_zeros() <= 20,
+            "add_level_flat_slice: invalid n_blk={}",
+            n_blk
+        );
+        assert!(
+            buf.len() >= Self::state_bytes_for(n_blk),
+            "add_level_flat_slice: buffer len {} < expected {}",
+            buf.len(),
+            Self::state_bytes_for(n_blk)
+        );
+        assert!(blk < n_blk && sub < G && (1..=63).contains(&lvl), "add_level_flat_slice: out-of-range blk/sub/lvl");
+        let anchor = buf[HEADER_BYTES + blk];
+        assert!(
+            (ANCHOR_INIT..=63).contains(&anchor),
+            "add_level_flat_slice: invalid anchor={} at blk={}",
+            anchor,
+            blk
+        );
+        unsafe { Self::add_level_flat_slice_unchecked(buf, n_blk, blk, sub, lvl) }
+    }
+
+    /// Unchecked inner flat-slice level update for internal callers that already verified bounds and header.
+    ///
+    /// # Safety
+    /// Caller must ensure `K >= 2`, `n_blk` is a power of two `<= 1 << 20`, `buf.len() >= Self::state_bytes_for(n_blk)`,
+    /// `blk < n_blk`, `sub < G`, `1 <= lvl <= 63`, and `ANCHOR_INIT <= buf[HEADER_BYTES + blk] <= 63`.
+    #[inline(always)]
+    pub unsafe fn add_level_flat_slice_unchecked(buf: &mut [u8], n_blk: usize, blk: usize, sub: usize, lvl: u8) -> bool {
+        debug_assert!(K >= 2 && blk < n_blk && sub < G && lvl >= 1 && lvl <= 63);
+        let anchor = *buf.get_unchecked(HEADER_BYTES + blk);
         if lvl.wrapping_add(8) <= anchor {
             return true;
         }
@@ -1473,14 +1624,14 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
             let bit_pos = sub * 5;
             let byte_pos = bit_pos >> 3;
             let bit_off = bit_pos & 7;
-            let p = unsafe { buf.as_mut_ptr().add(Self::slots_base_nblk(n_blk, blk) + byte_pos) as *mut u16 };
-            let word16 = unsafe { p.read_unaligned() };
+            let p = buf.as_mut_ptr().add(Self::slots_base_nblk(n_blk, blk) + byte_pos) as *mut u16;
+            let word16 = p.read_unaligned();
             let code = ((word16 >> bit_off) & 31) as u8;
             if code != SENTINEL_5B {
                 let tau_in = (lvl - (anchor - 8)) as usize;
-                let new_code = unsafe { *NORMAL_TRANSITION.get_unchecked(((tau_in - 1) << 5) | (code as usize)) };
+                let new_code = *NORMAL_TRANSITION.get_unchecked(((tau_in - 1) << 5) | (code as usize));
                 let nw = (word16 & !(31u16 << bit_off)) | ((new_code as u16) << bit_off);
-                unsafe { p.write_unaligned(nw); }
+                p.write_unaligned(nw);
                 return false;
             }
             Self::add_level_existing_ov_slice(buf, n_blk, blk, sub, lvl);
@@ -1492,6 +1643,10 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
 
     #[inline(always)]
     pub fn add_hash_64_flat_slice(buf: &mut [u8], n_blk: usize, mode: HashMode5b, h: u64) -> bool {
+        assert_eq!(buf.len(), Self::state_bytes_for(n_blk), "add_hash_64_flat_slice: buffer length mismatch");
+        let actual_hdr = u64::from_le_bytes([buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]]);
+        let exp_hdr = Self::expected_header_u64(n_blk, mode);
+        assert_eq!(actual_hdr, exp_hdr, "add_hash_64_flat_slice: header mismatch for mode {:?}", mode);
         let p_blk = n_blk.trailing_zeros();
         let blk_mask = n_blk - 1;
         match mode {
@@ -1500,7 +1655,7 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
                 let blk = ((h >> G.trailing_zeros()) as usize) & blk_mask;
                 let sentinel = 1u64 << (p_blk + G.trailing_zeros() - 1);
                 let lvl = ((h | sentinel).leading_zeros() + 1) as u8;
-                Self::add_level_flat_slice(buf, n_blk, blk, sub, lvl)
+                unsafe { Self::add_level_flat_slice_unchecked(buf, n_blk, blk, sub, lvl) }
             }
             HashMode5b::Div3 => {
                 let hc = h.wrapping_sub((h == u64::MAX) as u64);
@@ -1514,7 +1669,19 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
                 }
                 let r3 = hc.wrapping_sub(q.wrapping_mul(3)) as usize;
                 let sub = (r3 << 7) | ((q & 127) as usize);
-                Self::add_level_flat_slice(buf, n_blk, blk, sub, lvl)
+                unsafe { Self::add_level_flat_slice_unchecked(buf, n_blk, blk, sub, lvl) }
+            }
+            HashMode5b::MulShift384 => {
+                let blk = ((h >> 25) as usize) & blk_mask;
+                let sentinel = 1u64 << (25 + p_blk - 1);
+                let lvl = ((h | sentinel).leading_zeros() + 1) as u8;
+                let anchor = unsafe { *buf.get_unchecked(HEADER_BYTES + blk) };
+                if lvl.wrapping_add(8) <= anchor {
+                    return true;
+                }
+                let r3 = (((h & 0x3_FFFF).wrapping_mul(3)) >> 18) as usize;
+                let sub = (r3 << 7) | (((h >> 18) as usize) & 127);
+                unsafe { Self::add_level_flat_slice_unchecked(buf, n_blk, blk, sub, lvl) }
             }
             HashMode5b::Hash128 => panic!("add_hash_64_flat_slice called on Hash128"),
         }
@@ -1633,12 +1800,41 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
     }
 
     #[inline]
-    pub fn unpack_block_u8_slice(buf: &[u8], n_blk: usize, blk: usize, out: &mut [u8; G]) {
+    pub fn unpack_block_u8_slice_scalar(buf: &[u8], n_blk: usize, blk: usize, out: &mut [u8; G]) {
         let anchor = buf[HEADER_BYTES + blk];
         let slot_base = Self::slots_base_nblk(n_blk, blk);
         let meta_base = Self::meta_rest_base_nblk(n_blk, blk);
         let ovs = &buf[meta_base..meta_base + Self::OV_CAP];
+        let base_lo_shift = (anchor - 8) << 2;
+        let slots = &buf[slot_base..slot_base + Self::SLOT_BYTES];
+        let mut ov_idx = 0usize;
+        let mut r = 0usize;
+        let mut bp = 0usize;
+        while r < G {
+            let w: u64 = (slots[bp] as u64)
+                | ((slots[bp + 1] as u64) << 8)
+                | ((slots[bp + 2] as u64) << 16)
+                | ((slots[bp + 3] as u64) << 24)
+                | ((slots[bp + 4] as u64) << 32);
+            for j in 0..8 {
+                let c = ((w >> (j * 5)) & 31) as usize;
+                out[r + j] = if c == 0 {
+                    0u8
+                } else if c == SENTINEL_5B as usize {
+                    let ov = ovs[ov_idx];
+                    ov_idx += 1;
+                    ov
+                } else {
+                    base_lo_shift + CODE_TO_REL_U8_64.0[c]
+                };
+            }
+            r += 8;
+            bp += 5;
+        }
+    }
 
+    #[inline]
+    pub fn unpack_block_u8_slice(buf: &[u8], n_blk: usize, blk: usize, out: &mut [u8; G]) {
         #[cfg(all(
             target_arch = "x86_64",
             target_feature = "avx512bw",
@@ -1646,39 +1842,16 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
             target_feature = "avx512vbmi2"
         ))]
         unsafe {
+            let anchor = buf[HEADER_BYTES + blk];
+            let slot_base = Self::slots_base_nblk(n_blk, blk);
+            let meta_base = Self::meta_rest_base_nblk(n_blk, blk);
+            let ovs = &buf[meta_base..meta_base + Self::OV_CAP];
             avx512_5b::unpack_block_avx512::<G, K>(anchor, buf.as_ptr().add(slot_base), ovs, out);
             return;
         }
 
         #[allow(unreachable_code)]
-        {
-            let base_lo_shift = (anchor - 8) << 2;
-            let slots = &buf[slot_base..slot_base + Self::SLOT_BYTES];
-            let mut ov_idx = 0usize;
-            let mut r = 0usize;
-            let mut bp = 0usize;
-            while r < G {
-                let w: u64 = (slots[bp] as u64)
-                    | ((slots[bp + 1] as u64) << 8)
-                    | ((slots[bp + 2] as u64) << 16)
-                    | ((slots[bp + 3] as u64) << 24)
-                    | ((slots[bp + 4] as u64) << 32);
-                for j in 0..8 {
-                    let c = ((w >> (j * 5)) & 31) as usize;
-                    out[r + j] = if c == 0 {
-                        0u8
-                    } else if c == SENTINEL_5B as usize {
-                        let ov = ovs[ov_idx];
-                        ov_idx += 1;
-                        ov
-                    } else {
-                        base_lo_shift + CODE_TO_REL_U8_64.0[c]
-                    };
-                }
-                r += 8;
-                bp += 5;
-            }
-        }
+        Self::unpack_block_u8_slice_scalar(buf, n_blk, blk, out);
     }
 
     #[inline]
@@ -1755,9 +1928,13 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
 
     /// Zero-copy AVX-512 merge directly on flat slab slices (`dst |= src`).
     pub fn merge_flat_slices(dst: &mut [u8], src: &[u8], n_blk: usize) {
-        debug_assert_eq!(dst.len(), Self::state_bytes_for(n_blk));
-        debug_assert_eq!(src.len(), Self::state_bytes_for(n_blk));
-        debug_assert_eq!(&dst[0..8], &src[0..8]);
+        assert!(K >= 2 && Self::OV_CAP >= 1, "packed OsBmw5bInPlace requires K >= 2 (OV_CAP >= 1)");
+        assert!(n_blk >= 1 && n_blk.is_power_of_two() && n_blk.trailing_zeros() <= 20);
+        assert_eq!(dst.len(), Self::state_bytes_for(n_blk), "merge_flat_slices: dst length mismatch");
+        assert_eq!(src.len(), Self::state_bytes_for(n_blk), "merge_flat_slices: src length mismatch");
+        assert_eq!(dst[0], SketchHeader::MAGIC, "merge_flat_slices: invalid dst header magic");
+        assert_eq!(dst[2], n_blk.trailing_zeros() as u8, "merge_flat_slices: dst p_blk mismatch");
+        assert_eq!(&dst[0..8], &src[0..8], "merge_flat_slices: wire/mode header mismatch");
         for blk in 0..n_blk {
             let a1 = dst[HEADER_BYTES + blk];
             let a2 = src[HEADER_BYTES + blk];
@@ -1783,9 +1960,11 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
                         let b = src[o_meta + i];
                         let ou = b >> 2;
                         let oh = b & 3;
-                        Self::add_level_flat_slice(dst, n_blk, blk, r, ou);
-                        if (oh & 1) != 0 && ou >= 2 { Self::add_level_flat_slice(dst, n_blk, blk, r, ou - 1); }
-                        if (oh & 2) != 0 && ou >= 3 { Self::add_level_flat_slice(dst, n_blk, blk, r, ou - 2); }
+                        unsafe {
+                            Self::add_level_flat_slice_unchecked(dst, n_blk, blk, r, ou);
+                            if (oh & 1) != 0 && ou >= 2 { Self::add_level_flat_slice_unchecked(dst, n_blk, blk, r, ou - 1); }
+                            if (oh & 2) != 0 && ou >= 3 { Self::add_level_flat_slice_unchecked(dst, n_blk, blk, r, ou - 2); }
+                        }
                     }
                     continue;
                 }
@@ -1799,9 +1978,11 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
                             ov_idx += 1;
                             let ou = b >> 2;
                             let oh = b & 3;
-                            Self::add_level_flat_slice(dst, n_blk, blk, r, ou);
-                            if (oh & 1) != 0 && ou >= 2 { Self::add_level_flat_slice(dst, n_blk, blk, r, ou - 1); }
-                            if (oh & 2) != 0 && ou >= 3 { Self::add_level_flat_slice(dst, n_blk, blk, r, ou - 2); }
+                            unsafe {
+                                Self::add_level_flat_slice_unchecked(dst, n_blk, blk, r, ou);
+                                if (oh & 1) != 0 && ou >= 2 { Self::add_level_flat_slice_unchecked(dst, n_blk, blk, r, ou - 1); }
+                                if (oh & 2) != 0 && ou >= 3 { Self::add_level_flat_slice_unchecked(dst, n_blk, blk, r, ou - 2); }
+                            }
                         }
                     }
                     continue;
@@ -1836,13 +2017,36 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
             {
                 let mut u_a = [0u8; G];
                 let mut u_b = [0u8; G];
-                Self::unpack_block_u8_slice(dst, n_blk, blk, &mut u_a);
-                Self::unpack_block_u8_slice(src, n_blk, blk, &mut u_b);
+                Self::unpack_block_u8_slice_scalar(dst, n_blk, blk, &mut u_a);
+                Self::unpack_block_u8_slice_scalar(src, n_blk, blk, &mut u_b);
                 for r in 0..G {
                     u_a[r] = merge_ull_u8(u_a[r], u_b[r]);
                 }
                 Self::pack_block_u8_slice(dst, n_blk, blk, &u_a, a1.max(a2));
             }
+        }
+    }
+
+    /// Always-scalar reference merge on flat slices (`dst |= src`) bypassing all AVX-512 paths.
+    pub fn merge_flat_slices_scalar(dst: &mut [u8], src: &[u8], n_blk: usize) {
+        assert!(K >= 2 && Self::OV_CAP >= 1, "packed OsBmw5bInPlace requires K >= 2 (OV_CAP >= 1)");
+        assert!(n_blk >= 1 && n_blk.is_power_of_two() && n_blk.trailing_zeros() <= 20);
+        assert_eq!(dst.len(), Self::state_bytes_for(n_blk), "merge_flat_slices_scalar: dst length mismatch");
+        assert_eq!(src.len(), Self::state_bytes_for(n_blk), "merge_flat_slices_scalar: src length mismatch");
+        assert_eq!(dst[0], SketchHeader::MAGIC, "merge_flat_slices_scalar: invalid dst header magic");
+        assert_eq!(dst[2], n_blk.trailing_zeros() as u8, "merge_flat_slices_scalar: dst p_blk mismatch");
+        assert_eq!(&dst[0..8], &src[0..8], "merge_flat_slices_scalar: wire/mode header mismatch");
+        for blk in 0..n_blk {
+            let a1 = dst[HEADER_BYTES + blk];
+            let a2 = src[HEADER_BYTES + blk];
+            let mut u_a = [0u8; G];
+            let mut u_b = [0u8; G];
+            Self::unpack_block_u8_slice_scalar(dst, n_blk, blk, &mut u_a);
+            Self::unpack_block_u8_slice_scalar(src, n_blk, blk, &mut u_b);
+            for r in 0..G {
+                u_a[r] = merge_ull_u8(u_a[r], u_b[r]);
+            }
+            Self::pack_block_u8_slice(dst, n_blk, blk, &u_a, a1.max(a2));
         }
     }
 
@@ -1901,20 +2105,68 @@ pub struct OsBmwChunkInPlace {
     pub buf: Vec<u8>,
     pub n_blk: usize,
     pub p_blk: u32,
+    pub is_128: bool,
 }
 
 impl OsBmwChunkInPlace {
-    pub fn new(n_blk: usize) -> Self {
+    const FLAG_HASH128: u8 = 4;
+
+    fn new_with_mode(n_blk: usize, is_128: bool) -> Self {
         assert!(n_blk >= 1 && n_blk.is_power_of_two() && n_blk <= (1 << 16));
         let p_blk = n_blk.trailing_zeros();
         let total = HEADER_BYTES + n_blk * CHUNK_BLOCK_BYTES;
         let mut buf = vec![0u8; total];
-        let hdr = SketchHeader::new(14, p_blk as u8, 0, (1024u32 << 16) | (32u32 << 8) | (8u32 << 4) | 2);
+        let flags = if is_128 { Self::FLAG_HASH128 } else { 0 };
+        let hdr = SketchHeader::new(14, p_blk as u8, flags, (1024u32 << 16) | (32u32 << 8) | (8u32 << 4) | 2);
         buf[0..8].copy_from_slice(&hdr.to_u64().to_le_bytes());
         for b in 0..n_blk {
             buf[HEADER_BYTES + b] = ANCHOR_INIT;
         }
-        Self { buf, n_blk, p_blk }
+        Self { buf, n_blk, p_blk, is_128 }
+    }
+
+    pub fn new(n_blk: usize) -> Self {
+        Self::new_with_mode(n_blk, false)
+    }
+
+    pub fn new_128(n_blk: usize) -> Self {
+        Self::new_with_mode(n_blk, true)
+    }
+
+    pub fn from_bytes(bytes: &[u8], is_128: bool) -> Result<Self, String> {
+        if bytes.len() < HEADER_BYTES {
+            return Err("buffer shorter than 8B header".to_string());
+        }
+        let hdr = SketchHeader::from_u64(u64::from_le_bytes(bytes[0..8].try_into().unwrap()));
+        if hdr.magic != SketchHeader::MAGIC {
+            return Err("bad header magic".to_string());
+        }
+        if hdr.kind != 14 {
+            return Err(format!("header kind {} != expected 14", hdr.kind));
+        }
+        let expected_flags = if is_128 { Self::FLAG_HASH128 } else { 0 };
+        if hdr.flags != expected_flags {
+            return Err(format!("header flags 0x{:02x} != expected 0x{:02x}", hdr.flags, expected_flags));
+        }
+        let expected_aux = (1024u32 << 16) | (32u32 << 8) | (8u32 << 4) | 2;
+        if hdr.aux != expected_aux {
+            return Err(format!("header aux 0x{:08x} != expected 0x{:08x}", hdr.aux, expected_aux));
+        }
+        let p_blk = hdr.p_or_k as u32;
+        if p_blk > 16 {
+            return Err(format!("p_blk={} exceeds max 16", p_blk));
+        }
+        let n_blk = 1usize << p_blk;
+        let expected = HEADER_BYTES + n_blk * CHUNK_BLOCK_BYTES;
+        if bytes.len() != expected {
+            return Err(format!("byte len {} != expected {}", bytes.len(), expected));
+        }
+        Ok(Self { buf: bytes.to_vec(), n_blk, p_blk, is_128 })
+    }
+
+    #[inline(always)]
+    pub fn as_wire_bytes(&self) -> &[u8] {
+        &self.buf
     }
 
     pub fn dist_spec_64(&self) -> DistSpec {
@@ -1956,6 +2208,7 @@ impl OsBmwChunkInPlace {
 
     #[inline(always)]
     pub fn add_hash_64(&mut self, h: u64, pmf: &PreimagePmf) -> bool {
+        assert!(!self.is_128, "OsBmwChunkInPlace::add_hash_64 called on 128-bit sketch; use add_hash_128");
         let sub = (h & 1023) as usize;
         let blk = ((h >> 10) & ((self.n_blk as u64) - 1)) as usize;
         let rem = h >> (10 + self.p_blk);
@@ -1972,6 +2225,7 @@ impl OsBmwChunkInPlace {
 
     #[inline(always)]
     pub fn add_hash_128(&mut self, h_lo: u64, h_hi: u64, pmf: &PreimagePmf) -> bool {
+        assert!(self.is_128, "OsBmwChunkInPlace::add_hash_128 requires OsBmwChunkInPlace::new_128");
         let blk = (h_lo as usize) & (self.n_blk - 1);
         let sub = ((h_lo >> 20) as usize) & 1023;
         let anchor = unsafe { *self.buf.get_unchecked(HEADER_BYTES + blk) } as usize;
@@ -2091,8 +2345,8 @@ impl OsBmwChunkInPlace {
     }
 
     pub fn merge_in_place(&mut self, other: &Self) -> Result<(), String> {
-        if self.n_blk != other.n_blk || self.buf[0..8] != other.buf[0..8] {
-            return Err("OsBmwChunkInPlace merge mismatch".to_string());
+        if self.n_blk != other.n_blk || self.is_128 != other.is_128 || self.buf[0..8] != other.buf[0..8] {
+            return Err("OsBmwChunkInPlace header/mode mismatch".to_string());
         }
         let mut ua = [0u8; CHUNK_G];
         let mut ub = [0u8; CHUNK_G];
@@ -2150,7 +2404,7 @@ impl OsBmwChunkInPlace {
 }
 
 // ---------------------------------------------------------------------------
-// Standard Ertl §4.3 Sparse Mode + Dense OS-BMW Hybrid (A4 Gate!)
+// Standard Ertl §4.3 Sparse Mode + Dense OS-BMW Hybrid
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
@@ -2170,7 +2424,7 @@ impl<const G: usize, const K: usize> OsBmwHybrid<G, K> {
     const V_BITS: u32 = 25;
 
     pub fn new(n_blk: usize, mode: HashMode5b) -> Self {
-        assert!(mode != HashMode5b::Hash128, "OsBmwHybrid only supports 64-bit modes Pow2/Div3");
+        assert!(matches!(mode, HashMode5b::Pow2 | HashMode5b::Div3), "OsBmwHybrid only supports 64-bit modes Pow2/Div3");
         let dense_payload = n_blk * OsBmw5bInPlace::<G, K, false>::BLOCK_BYTES;
         let max_slots = (dense_payload / 4).max(16);
         let cap = if max_slots.is_power_of_two() { max_slots } else { max_slots.next_power_of_two() >> 1 };
@@ -2225,7 +2479,7 @@ impl<const G: usize, const K: usize> OsBmwHybrid<G, K> {
                 let nlz = (q | sentinel).leading_zeros();
                 ((((low23 << 2) | r3) << 6) | nlz) + 1
             }
-            HashMode5b::Hash128 => unreachable!("OsBmwHybrid is 64-bit only"),
+            HashMode5b::MulShift384 | HashMode5b::Hash128 => unreachable!("OsBmwHybrid is 64-bit Pow2/Div3 only"),
         }
     }
 
@@ -2267,7 +2521,7 @@ impl<const G: usize, const K: usize> OsBmwHybrid<G, K> {
                 };
                 (blk, sub, lvl)
             }
-            HashMode5b::Hash128 => unreachable!("OsBmwHybrid is 64-bit only"),
+            HashMode5b::MulShift384 | HashMode5b::Hash128 => unreachable!("OsBmwHybrid is 64-bit Pow2/Div3 only"),
         }
     }
 
@@ -2506,7 +2760,7 @@ impl<const G: usize, const K: usize> OsBmwHybrid<G, K> {
                         }
                         (n, 20)
                     }
-                    HashMode5b::Hash128 => unreachable!("OsBmwHybrid is 64-bit only"),
+                    HashMode5b::MulShift384 | HashMode5b::Hash128 => unreachable!("OsBmwHybrid is 64-bit Pow2/Div3 only"),
                 }
             }
         }

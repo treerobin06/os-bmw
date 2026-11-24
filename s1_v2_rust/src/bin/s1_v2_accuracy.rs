@@ -140,8 +140,8 @@ fn sample_osbmw5b_at_n<const G: usize, const K: usize, const HAS_MASK: bool>(
     sk
 }
 
-fn sample_chunk_at_n(n_blk: usize, pmf: &PreimagePmf, n: f64, rng: &mut u64) -> OsBmwChunkInPlace {
-    let mut sk = OsBmwChunkInPlace::new(n_blk);
+fn sample_chunk_at_n(n_blk: usize, is_128: bool, pmf: &PreimagePmf, n: f64, rng: &mut u64) -> OsBmwChunkInPlace {
+    let mut sk = if is_128 { OsBmwChunkInPlace::new_128(n_blk) } else { OsBmwChunkInPlace::new(n_blk) };
     let lam = n / ((n_blk * CHUNK_G) as f64);
     let km = pmf.k_reach;
     let mut cdf = vec![0.0_f64; km + 1];
@@ -236,46 +236,27 @@ fn sample_hll6_at_n(p: u32, pmf: &PreimagePmf, n: f64, rng: &mut u64) -> Hll6Ske
     sk
 }
 
-fn sample_avll_at_n(n_words: usize, n: f64, rng: &mut u64) -> AvllSketch {
-    // True chronological Poissonized jump matching `AvllSketch::add_hash_64` single-64-bit semantics:
-    //   - Low 32 bits select bucket `r = ((h_lo * m) >> 32)` (exact interval [L_r, U_r))
-    //   - Full 64-bit word sets `abs_nlz = (h.leading_zeros() + 1).min(63)`
-    // Uses exact joint preimage rate `P(r, k) = C(r, k) / 2^64` per bucket (0 for unreachable (r, k))
-    // and non-clamping uniform pre-advance for deeply saturated levels <= min(k_lo - 1, 32).
-    const INV_2_64: f64 = 1.0 / 18_446_744_073_709_551_616.0;
-    let mut sk = AvllSketch::new_words(n_words);
-    let m = sk.m;
+fn sample_hbs_at_n(p: u32, pmf: &PreimagePmf, n: f64, rng: &mut u64) -> HbsSketch {
+    let m = 1usize << p;
     let lam = n / (m as f64);
-    let log2_lam = (lam.max(1.0)).log2().floor() as i32;
-    let k_lo = (log2_lam - 6).max(1) as usize;
-    // Levels 1..=32 are reachable by EVERY bucket with rate ~2^-k / m; for k <= k_lo - 1,
-    // n * rate >= 2^6 = 64 so P(missed) < 1e-23. Pre-advance cleanly without MAX_EXP clamping!
-    let k_pre = (k_lo - 1).min(32);
-    if k_pre > 0 {
-        sk.prefill_uniform_saturated(k_pre as u8);
+    let km = pmf.k_reach;
+    let mut cdf = vec![0.0_f64; km + 1];
+    for u in 0..=km {
+        let x = lam * pmf.tail[u];
+        cdf[u] = if x > 745.0 { 0.0 } else { (-x).exp() };
     }
-    // Collect active first-arrival events (time <= n) using exact joint (r, k) rates & replay chronologically!
-    let mut events: Vec<(f64, u32, u8)> = Vec::with_capacity(m * 8);
+    let mut regs = vec![0u8; m];
     for r in 0..m {
-        let (l_r, u_r) = AvllSketch::bucket_lo32_bounds(r, m);
-        for k in (k_pre + 1)..=63 {
-            let c = AvllSketch::joint_preimage_count(k, l_r, u_r);
-            if c == 0 {
-                continue;
-            }
-            let rate = (c as f64) * INV_2_64;
-            let u01 = rng_u01(rng);
-            let t = -u01.ln() / rate;
-            if t <= n {
-                events.push((t, r as u32, k as u8));
-            }
+        let u01 = rng_u01(rng);
+        let mut lo = 0usize;
+        let mut hi = km;
+        while lo < hi {
+            let mid = (lo + hi) >> 1;
+            if cdf[mid] < u01 { lo = mid + 1; } else { hi = mid; }
         }
+        regs[r] = lo as u8;
     }
-    events.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-    for (_, r, k) in events {
-        sk.add_level(r as usize, k);
-    }
-    sk
+    HbsSketch::from_hll_registers(p, &regs)
 }
 
 /// Exact Poissonized coupon-matrix jump sampler for `CpcSketch` at any cardinality `n <= 2^64`.
@@ -329,8 +310,7 @@ fn sample_cpc_at_n(lg_k: u32, pmf: &PreimagePmf, n: f64, rng: &mut u64) -> CpcSk
             }
         }
     }
-    let avg_per_row = (total_coupons as f64) / (m as f64);
-    let fi_col = (avg_per_row.floor() as i32 - 4).clamp(0, 54) as u8;
+    let fi_col = (((total_coupons / (m as u64)) as i32) - 4).clamp(0, 54) as u8;
     sk.fi_col = fi_col;
     sk.num_coupons = total_coupons;
     let fi = fi_col as usize;
@@ -344,7 +324,11 @@ fn sample_cpc_at_n(lg_k: u32, pmf: &PreimagePmf, n: f64, rng: &mut u64) -> CpcSk
     }
     for (col, bits) in dense_cols {
         if col < fi {
-            continue;
+            for r in 0..m {
+                if ((bits[r >> 6] >> (r & 63)) & 1) == 0 {
+                    sk.insert_sv((((r as u32) << 6) | (col as u32)) + 1);
+                }
+            }
         } else if col < fi + 8 {
             let bit = 1u8 << (col - fi);
             for (wi, &word) in bits.iter().enumerate() {
@@ -371,7 +355,15 @@ fn sample_cpc_at_n(lg_k: u32, pmf: &PreimagePmf, n: f64, rng: &mut u64) -> CpcSk
     }
     for (col, hits) in sparse_cols {
         if col < fi {
-            continue;
+            let mut present = vec![false; m];
+            for r in hits {
+                present[r as usize] = true;
+            }
+            for r in 0..m {
+                if !present[r] {
+                    sk.insert_sv((((r as u32) << 6) | (col as u32)) + 1);
+                }
+            }
         } else if col < fi + 8 {
             let bit = 1u8 << (col - fi);
             for r in hits {
@@ -435,65 +427,6 @@ fn sample_hll4_dyn_at_n(p: u32, pmf: &PreimagePmf, n: f64, rng: &mut u64) -> Hll
         levels[r] = lo as u8;
     }
     Hll4Sketch::from_exact_levels(p, &levels)
-}
-
-/// Chronological first-arrival Poissonized jump sampler for order-dependent `Hll4Sketch::new_fixed`.
-/// Matches `sample_avll_at_n` semantics: replays per-(bucket, level) first-arrival times without
-/// modeling post-promotion re-arrival recovery of previously clamped slots.
-fn sample_hll4_fixed_at_n(p: u32, cap: usize, pmf: &PreimagePmf, n: f64, rng: &mut u64) -> Hll4Sketch {
-    let mut sk = Hll4Sketch::new_fixed(p, cap);
-    let m = sk.m;
-    let lam = n / (m as f64);
-    let km = pmf.k_reach;
-    let log2_lam = lam.max(1.0).log2().floor() as i32;
-    let k_lo = (log2_lam - 6).max(1) as usize;
-    let k_pre = (k_lo - 1).min(km.saturating_sub(1));
-    if k_pre > 0 {
-        sk.prefill_uniform_saturated(k_pre as u8);
-    }
-    let mut events: Vec<(f64, u32, u8)> = Vec::with_capacity(m * 8);
-    let inv_m = 1.0 / (m as f64);
-    for k in (k_pre + 1)..=km {
-        let rate = pmf.probs[k] * inv_m;
-        if rate <= 0.0 {
-            continue;
-        }
-        let x = n * rate;
-        if x < 1e-18 {
-            break;
-        }
-        let p1 = if x > 700.0 { 1.0 } else { -(-x).exp_m1() };
-        if p1 >= 0.05 {
-            for r in 0..m {
-                let t = -rng_u01(rng).ln() / rate;
-                if t <= n {
-                    events.push((t, r as u32, k as u8));
-                }
-            }
-        } else if p1 > 0.0 {
-            let inv_log = 1.0 / (-p1).ln_1p();
-            let mut r = 0usize;
-            loop {
-                let skip_f = (rng_u01(rng).ln() * inv_log).floor();
-                if !skip_f.is_finite() || skip_f >= (m as f64) {
-                    break;
-                }
-                r += skip_f as usize;
-                if r >= m {
-                    break;
-                }
-                let u = rng_u01(rng);
-                let t = -(-(u * p1)).ln_1p() / rate;
-                events.push((t.min(n), r as u32, k as u8));
-                r += 1;
-            }
-        }
-    }
-    events.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-    for (_, r, k) in events {
-        sk.add_level(r as usize, k);
-    }
-    sk
 }
 
 #[derive(Clone, Debug)]
@@ -623,7 +556,7 @@ fn main() {
         .get(2)
         .map(PathBuf::from)
         .or_else(|| env::var("S1_DATA_DIR").ok().map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("data"));
+        .unwrap_or_else(|| PathBuf::from("./data"));
     let n_threads: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(24);
     fs::create_dir_all(&out_dir).expect("create out_dir");
 
@@ -676,24 +609,22 @@ fn main() {
         let pmf_5b = if nblk_5b > 0 { Some(Arc::new(PreimagePmf::build(DistSpec::Pow2 { w_bits: 64 - 9 - nblk_5b.trailing_zeros(), max_cap: 63 }))) } else { None };
         let pmf_g128 = if nblk_g128 > 0 { Some(Arc::new(PreimagePmf::build(DistSpec::Pow2 { w_bits: 64 - 7 - nblk_g128.trailing_zeros(), max_cap: 63 }))) } else { None };
         let pmf_chunk = if nblk_chunk > 0 { Some(Arc::new(PreimagePmf::build(DistSpec::GeomNegLog2 { b: 2.05, w_bits: 64 - 10 - nblk_chunk.trailing_zeros(), max_cap: 63 }))) } else { None };
-        let pmf_avll = Arc::new(PreimagePmf::build(DistSpec::Pow2 { w_bits: 64, max_cap: 63 }));
         let pmf_cpc = Arc::new(PreimagePmf::build(DistSpec::Pow2 { w_bits: 64 - cpc_lgk, max_cap: 63 }));
 
         for &(card, is_stream) in &cards {
             let exact_sim_mode = if is_stream { "stream_64b" } else { "ertl_jump_64b" };
-            let first_arr_sim_mode = if is_stream { "stream_64b" } else { "first_arrival_jump_64b" };
             // Run `n_trials_sweep` in parallel across `n_threads`
             let mut results_per_method: Vec<(String, Vec<f64>, f64, f64, &'static str)> = Vec::new();
-            let run_par = |method_name: &str, mode_tag: &'static str, f: &(dyn Fn(usize) -> (f64, usize, usize) + Sync)| -> (String, Vec<f64>, f64, f64, &'static str) {
-                let per_t = (n_trials_sweep + n_threads - 1) / n_threads;
-                let mut errs = Vec::with_capacity(n_trials_sweep);
+            let run_par_n = |method_name: &str, mode_tag: &'static str, n_tr: usize, f: &(dyn Fn(usize) -> (f64, usize, usize) + Sync)| -> (String, Vec<f64>, f64, f64, &'static str) {
+                let per_t = (n_tr + n_threads - 1) / n_threads;
+                let mut errs = Vec::with_capacity(n_tr);
                 let mut sum_ram = 0.0_f64;
                 let mut sum_wire = 0.0_f64;
                 thread::scope(|s| {
                     let mut handles = Vec::new();
                     for tid in 0..n_threads {
                         let start = tid * per_t;
-                        let end = (start + per_t).min(n_trials_sweep);
+                        let end = (start + per_t).min(n_tr);
                         if start >= end { continue; }
                         handles.push(s.spawn(move || {
                             let mut loc = Vec::with_capacity(end - start);
@@ -717,6 +648,9 @@ fn main() {
                 });
                 let nt = errs.len() as f64;
                 (method_name.to_string(), errs, sum_ram / nt, sum_wire / nt, mode_tag)
+            };
+            let run_par = |method_name: &str, mode_tag: &'static str, f: &(dyn Fn(usize) -> (f64, usize, usize) + Sync)| {
+                run_par_n(method_name, mode_tag, n_trials_sweep, f)
             };
 
             let card_u64 = card as u64;
@@ -785,7 +719,7 @@ fn main() {
                         ((est - card) / card, sk.buf.len(), sk.buf.len())
                     } else {
                         let mut rng = seed;
-                        let sk = sample_chunk_at_n(nblk_chunk, pmf, card, &mut rng);
+                        let sk = sample_chunk_at_n(nblk_chunk, false, pmf, card, &mut rng);
                         let est = sk.estimate_ml(pmf).0;
                         ((est - card) / card, sk.buf.len(), sk.buf.len())
                     }
@@ -852,24 +786,28 @@ fn main() {
                 ((est - card) / card, sk.total_bytes(), sk.total_bytes())
             }));
 
-            // 9. AVLL across ALL 72 cells (including 2^64 to expose exact physical 32-bit bucket-prefix ceiling!)
-            results_per_method.push(run_par("AVLL", first_arr_sim_mode, &|tr| {
-                let seed = splitmix64(0x9009_0000 ^ (tr as u64) ^ card.to_bits());
-                let sk = if is_stream {
+            // 9. AVLL: exact direct streaming ONLY for n <= 10^6 (using exact-modulo Poisson ML);
+            //    order-dependent non-semilattice sketches are NOT simulated via lossy jump samplers for n > 10^6!
+            if card <= 1e6 {
+                let n_tr_avll = if card <= 1e5 { n_trials_sweep } else { n_trials_sweep.min(200) };
+                results_per_method.push(run_par_n("AVLL", "stream_64b", n_tr_avll, &|tr| {
+                    let seed = splitmix64(0x9009_0000 ^ (tr as u64) ^ card.to_bits());
                     let mut s = AvllSketch::new_words(avll_w);
                     for i in 0..card_u64 { s.add_hash_64(wyhash64(i, seed)); }
-                    s
-                } else {
-                    let mut rng = seed;
-                    sample_avll_at_n(avll_w, card, &mut rng)
-                };
-                let est = sk.estimate_ml(&pmf_avll).0;
-                ((est - card) / card, sk.total_bytes(), sk.total_bytes())
-            }));
+                    let est = s.estimate_ml_exact_mod().0;
+                    ((est - card) / card, s.total_bytes(), s.total_bytes())
+                }));
+            } else {
+                let nom_b = HEADER_BYTES + avll_w * 8;
+                writeln!(
+                    eq_tsv,
+                    "{}\tAVLL\t{:.1}\t{:.1}\t{:.3e}\t0\tNA\tNA\tNA\tNA\tNA\tna_order_dependent_no_jump",
+                    blab, nom_b as f64, nom_b as f64, card
+                ).unwrap();
+            }
 
-            // 10. Variable-size & fixed-aux baselines across ALL 72 cells:
-            //     stream_64b for n <= 1e5, exact Poissonized jump for CPC / HLLL / HLL_4-Dyn,
-            //     chronological first-arrival jump for order-dependent HLL_4-Fixed!
+            // 10. Exact semilattice variable-size & lossless compressed baselines across ALL 72 cells:
+            //     CPC, HLLL, HLL_4-Dyn, and Karppa (2026) HBS (lossless Huffman-Bucket Sketch).
             results_per_method.push(run_par("CPC", exact_sim_mode, &|tr| {
                 let seed = splitmix64(0xa00a_0000 ^ (tr as u64) ^ card.to_bits());
                 let sk = if is_stream {
@@ -910,20 +848,39 @@ fn main() {
                 let est = sk.estimate_ml(&pmf_ull).0;
                 ((est - card) / card, sk.ram_bytes(), sk.wire_bytes())
             }));
-            results_per_method.push(run_par("HLL_4-Fixed", first_arr_sim_mode, &|tr| {
-                let seed = splitmix64(0xd00d_0000 ^ (tr as u64) ^ card.to_bits());
-                let cap = (1usize << (p_ull - 5)).max(8);
+            results_per_method.push(run_par("HBS", exact_sim_mode, &|tr| {
+                let seed = splitmix64(0xe00e_0000 ^ (tr as u64) ^ card.to_bits());
                 let sk = if is_stream {
-                    let mut s = Hll4Sketch::new_fixed(p_ull, cap);
+                    let mut s = HbsSketch::new(p_ull);
                     for i in 0..card_u64 { s.add_hash_64(wyhash64(i, seed)); }
                     s
                 } else {
                     let mut rng = seed;
-                    sample_hll4_fixed_at_n(p_ull, cap, &pmf_ull, card, &mut rng)
+                    sample_hbs_at_n(p_ull, &pmf_ull, card, &mut rng)
                 };
                 let est = sk.estimate_ml(&pmf_ull).0;
                 ((est - card) / card, sk.ram_bytes(), sk.wire_bytes())
             }));
+            // 11. HLL_4-Fixed (order-dependent): exact direct streaming ONLY for n <= 10^6; NA for n > 10^6!
+            if card <= 1e6 {
+                let n_tr_h4f = if card <= 1e5 { n_trials_sweep } else { n_trials_sweep.min(200) };
+                results_per_method.push(run_par_n("HLL_4-Fixed", "stream_64b", n_tr_h4f, &|tr| {
+                    let seed = splitmix64(0xd00d_0000 ^ (tr as u64) ^ card.to_bits());
+                    let cap = (1usize << (p_ull - 5)).max(8);
+                    let mut s = Hll4Sketch::new_fixed(p_ull, cap);
+                    for i in 0..card_u64 { s.add_hash_64(wyhash64(i, seed)); }
+                    let est = s.estimate_ml(&pmf_ull).0;
+                    ((est - card) / card, s.ram_bytes(), s.wire_bytes())
+                }));
+            } else {
+                let cap = (1usize << (p_ull - 5)).max(8);
+                let dummy = Hll4Sketch::new_fixed(p_ull, cap);
+                writeln!(
+                    eq_tsv,
+                    "{}\tHLL_4-Fixed\t{:.1}\t{:.1}\t{:.3e}\t0\tNA\tNA\tNA\tNA\tNA\tna_order_dependent_no_jump",
+                    blab, dummy.ram_bytes() as f64, dummy.wire_bytes() as f64, card
+                ).unwrap();
+            }
 
             for (mname, errs, rb, wb, mode_tag) in results_per_method {
                 let st = summarize_trials(&errs, rb, wb);
@@ -1024,7 +981,7 @@ fn main() {
     let (j_ch, _, _) = pmf_ch_mc.fisher_osbmw_periodic(1024, 32, 8, 2, 2.05, 1e6, 64);
     run_mc_config("OS-BMW-Chunk(656B)", 4 * CHUNK_BLOCK_BYTES, (CHUNK_BLOCK_BYTES * 8) as f64 / 1024.0 / j_ch, &|c, tr| {
         let mut rng = splitmix64(0x1555_0000 ^ (tr as u64) ^ c.to_bits());
-        let sk = sample_chunk_at_n(4, &pmf_ch_mc, c, &mut rng);
+        let sk = sample_chunk_at_n(4, false, &pmf_ch_mc, c, &mut rng);
         (sk.estimate_ml(&pmf_ch_mc).0 - c) / c
     }, &mut mc_tsv);
 
@@ -1169,7 +1126,6 @@ fn main() {
             let pmf_5b = Arc::new(PreimagePmf::build(DistSpec::Pow2 { w_bits: 64 - 9 - nblk_5b.trailing_zeros(), max_cap: 63 }));
             let pmf_ell = Arc::new(PreimagePmf::build(DistSpec::ErtlT { t: 2, w_bits: 64 - p_ell }));
             let pmf_ull = Arc::new(PreimagePmf::build(DistSpec::Pow2 { w_bits: 64 - p_ull, max_cap: 63 }));
-            let pmf_avll = Arc::new(PreimagePmf::build(DistSpec::Pow2 { w_bits: 64, max_cap: 63 }));
 
             let eval_real = |mname: &str, f: &(dyn Fn(&[u64], u64) -> (f64, usize) + Sync), out: &mut File| {
                 let mut errs = Vec::with_capacity(n_real_seeds);
@@ -1225,7 +1181,12 @@ fn main() {
             let _st_avll = eval_real("AVLL", &|data, seed| {
                 let mut sk = AvllSketch::new_words(avll_w);
                 for &x in data { sk.add_hash_64(wyhash64(x, seed)); }
-                ((sk.estimate_ml(&pmf_avll).0 - d_f64) / d_f64, sk.total_bytes())
+                ((sk.estimate_ml_exact_mod().0 - d_f64) / d_f64, sk.total_bytes())
+            }, &mut real_tsv);
+            let _st_hbs = eval_real("HBS", &|data, seed| {
+                let mut sk = HbsSketch::new(p_ull);
+                for &x in data { sk.add_hash_64(wyhash64(x, seed)); }
+                ((sk.estimate_ml(&pmf_ull).0 - d_f64) / d_f64, sk.ram_bytes())
             }, &mut real_tsv);
 
             if blab == "4KB" {
@@ -1280,13 +1241,13 @@ fn main() {
             for tr in 0..abl_trials {
                 let mut rng = splitmix64(0x8888_0000 ^ (tr as u64) ^ c.to_bits() ^ (hbits as u64));
                 let sk = if c <= 1e5 {
-                    let mut s = OsBmwChunkInPlace::new(4);
+                    let mut s = if hbits == 64 { OsBmwChunkInPlace::new(4) } else { OsBmwChunkInPlace::new_128(4) };
                     for i in 0..(c as u64) {
                         if hbits == 64 { s.add_hash_64(wyhash64(i, rng), pmf); } else { let (lo, hi) = wyhash128(i, rng); s.add_hash_128(lo, hi, pmf); }
                     }
                     s
                 } else {
-                    sample_chunk_at_n(4, pmf, c, &mut rng)
+                    sample_chunk_at_n(4, hbits == 128, pmf, c, &mut rng)
                 };
                 errs.push((sk.estimate_ml(pmf).0 - c) / c);
             }

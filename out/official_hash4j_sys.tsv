@@ -1,0 +1,7 @@
+method	p	state_bytes	arch	update_ns	merge_us	estimate_fgra_us	estimate_mle_us
+Hash4j_UltraLogLog	10	1024	aarch64/Mac OS X	2.551	1.0813	0.7249	2.1501
+Hash4j_HyperLogLog	10	768	aarch64/Mac OS X	9.259	0.3252	0.5913	1.3010
+Hash4j_UltraLogLog	11	2048	aarch64/Mac OS X	2.770	2.3785	1.5756	4.0619
+Hash4j_HyperLogLog	11	1536	aarch64/Mac OS X	10.357	0.7731	0.7748	2.0154
+Hash4j_UltraLogLog	12	4096	aarch64/Mac OS X	3.074	5.4244	3.4347	8.6354
+Hash4j_HyperLogLog	12	3072	aarch64/Mac OS X	11.161	1.5585	1.7133	3.7973

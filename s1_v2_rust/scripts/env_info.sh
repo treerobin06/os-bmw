@@ -62,7 +62,8 @@ bins = ["s1_v2_reconcile", "s1_v2_bench_sys", "s1_v2_accuracy"]
 zmm_counts = {}
 for name in bins:
     path = os.path.join(release_dir, name)
-    entry = {"path": path, "exists": os.path.isfile(path), "zmm_instruction_count": None}
+    rel_path = os.path.join("s1_v2_rust", "target", "release", name)
+    entry = {"path": rel_path, "exists": os.path.isfile(path), "zmm_instruction_count": None}
     if entry["exists"] and objdump_bin:
         p1 = subprocess.Popen([objdump_bin, "-d", path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         cnt = 0

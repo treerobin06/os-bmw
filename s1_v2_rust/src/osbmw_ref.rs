@@ -1,6 +1,6 @@
 //! Reference OS-BMW Block & Sketch (Exact Semilattice Oracle with Strict m2 Guards).
 //!
-//! Improvements over Pilot Round 2:
+//! Key guarantees:
 //!   - Uses `PreimagePmf` (single source of truth exact 64-bit preimage counts, zero ghost levels).
 //!   - Enforces strict `m2` guards: `n_blocks` must be a power of 2 in `1..=(1<<20)`; `merge()`
 //!     strictly checks `dist`, `q_bits`, `g`, `k`, `r_win`, `d`, `n_blocks` compatibility.
@@ -327,15 +327,83 @@ impl OsBmwRefSketch {
         if k == 0 || k > g || r_win == 0 {
             return Err(format!("invalid (g={}, k={}, R={})", g, k, r_win));
         }
+        match dist {
+            DistSpec::Pow2 { max_cap, .. }
+            | DistSpec::GeomNegLog2 { max_cap, .. }
+            | DistSpec::GeomExactFloor { max_cap, .. } => {
+                if max_cap == 0 || max_cap > 63 {
+                    return Err(format!("max_cap={} must be in 1..=63", max_cap));
+                }
+            }
+            _ => {}
+        }
+        if single_hash_64 {
+            let p_blk = n_blocks.trailing_zeros();
+            match dist {
+                DistSpec::Pow2 { w_bits, .. } => {
+                    if !g.is_power_of_two() {
+                        return Err(format!("single_hash_64 Pow2 requires power-of-two g, got {}", g));
+                    }
+                    let used_bits = p_blk + g.trailing_zeros();
+                    if used_bits >= 64 {
+                        return Err(format!("single_hash_64 Pow2 p_blk+s_sub={} must be < 64", used_bits));
+                    }
+                    let exact_w = 64u32 - used_bits;
+                    if w_bits != exact_w {
+                        return Err(format!(
+                            "single_hash_64 Pow2 requires exact remaining width w_bits={} == 64-p_blk-s_sub (got {})",
+                            exact_w, w_bits
+                        ));
+                    }
+                }
+                DistSpec::Pow2Div3 { p_tot } => {
+                    if g != 384 {
+                        return Err(format!("single_hash_64 Pow2Div3 requires g=384, got {}", g));
+                    }
+                    let expected_p_tot = 7 + p_blk;
+                    if p_tot >= 64 || p_tot != expected_p_tot {
+                        return Err(format!(
+                            "single_hash_64 Pow2Div3 requires p_tot={} < 64 == 7+p_blk (got {})",
+                            expected_p_tot, p_tot
+                        ));
+                    }
+                }
+                DistSpec::GeomNegLog2 { w_bits, .. } | DistSpec::GeomExactFloor { w_bits, .. } => {
+                    if !g.is_power_of_two() {
+                        return Err(format!("single_hash_64 Geom requires power-of-two g, got {}", g));
+                    }
+                    let max_w = 64u32.saturating_sub(p_blk + g.trailing_zeros());
+                    if w_bits == 0 || w_bits > max_w {
+                        return Err(format!(
+                            "single_hash_64 Geom w_bits={} must be in 1..={}",
+                            w_bits, max_w
+                        ));
+                    }
+                }
+                DistSpec::ErtlT { t, w_bits } => {
+                    if !g.is_power_of_two() {
+                        return Err(format!("single_hash_64 ErtlT requires power-of-two g, got {}", g));
+                    }
+                    let max_w = 64u32.saturating_sub(p_blk + g.trailing_zeros());
+                    if w_bits <= t || w_bits > max_w {
+                        return Err(format!(
+                            "single_hash_64 ErtlT requires {} < w_bits <= {} (got {})",
+                            t, max_w, w_bits
+                        ));
+                    }
+                }
+            }
+        }
         let pmf = PreimagePmf::build(dist);
-        if pmf.k_reach > ((1usize << q_bits) - 1) {
+        let q_max = if q_bits >= 63 { usize::MAX } else { (1usize << q_bits) - 1 };
+        if pmf.k_reach > q_max {
             return Err(format!("k_reach={} exceeds 2^{}-1", pmf.k_reach, q_bits));
         }
         let blocks = (0..n_blocks).map(|_| OsBmwBlock::new(g, k, r_win, d)).collect();
         Ok(Self { blocks, g, k, r_win, d, q_bits, dist, single_hash_64 })
     }
 
-    /// Strictly guarded merge (fixes Codex m2 finding: verifies ALL schema & distribution fields!).
+    /// Strictly guarded merge: verifies all schema, geometry, and distribution fields.
     pub fn try_merge(&self, other: &Self) -> Result<Self, String> {
         if self.blocks.len() != other.blocks.len() {
             return Err(format!("n_blocks mismatch: {} vs {}", self.blocks.len(), other.blocks.len()));
@@ -360,15 +428,24 @@ impl OsBmwRefSketch {
     }
 
     pub fn add_hash_64(&mut self, h: u64, pmf: &PreimagePmf) -> bool {
+        assert!(self.single_hash_64, "add_hash_64 requires single_hash_64 == true");
+        assert_eq!(
+            pmf.spec, self.dist,
+            "add_hash_64: PreimagePmf {:?} does not match sketch dist {:?}",
+            pmf.spec, self.dist
+        );
         let p_blk = self.blocks.len().trailing_zeros();
         let (blk, sub, lvl) = match self.dist {
-            DistSpec::Pow2 { .. } => {
+            DistSpec::Pow2 { w_bits, max_cap } => {
                 debug_assert!(self.g.is_power_of_two());
-                hash_to_pow2(h, p_blk, self.g.trailing_zeros())
+                let (b, s, raw_lvl) = hash_to_pow2(h, p_blk, self.g.trailing_zeros());
+                let eff_cap = (w_bits as usize + 1).min(max_cap).min(pmf.k_reach);
+                (b, s, (raw_lvl as usize).min(eff_cap) as u8)
             }
             DistSpec::Pow2Div3 { .. } => {
                 debug_assert_eq!(self.g, 384);
-                hash_to_256b(h, p_blk)
+                let (b, s, raw_lvl) = hash_to_256b(h, p_blk);
+                (b, s, (raw_lvl as usize).min(pmf.k_reach) as u8)
             }
             DistSpec::GeomNegLog2 { w_bits, .. } | DistSpec::GeomExactFloor { w_bits, .. } => {
                 debug_assert!(self.g.is_power_of_two());
@@ -397,10 +474,19 @@ impl OsBmwRefSketch {
     }
 
     pub fn add_hash_128(&mut self, h_lo: u64, h_hi: u64, pmf: &PreimagePmf) -> bool {
+        assert!(!self.single_hash_64, "add_hash_128 requires single_hash_64 == false");
+        assert_eq!(
+            pmf.spec, self.dist,
+            "add_hash_128: PreimagePmf {:?} does not match sketch dist {:?}",
+            pmf.spec, self.dist
+        );
         let n_blk = self.blocks.len();
         let blk = (h_lo as usize) & (n_blk - 1);
-        let h_sub_top = h_lo >> 20;
-        let sub = (((h_sub_top as u128) * (self.g as u128)) >> 44) as usize;
+        let sub = if self.g.is_power_of_two() {
+            ((h_lo >> 20) as usize) & (self.g - 1)
+        } else {
+            (((h_lo >> 20) as u128 * (self.g as u128)) >> 44) as usize
+        };
         let lvl = pmf.level_from_rem(h_hi);
         self.blocks[blk].add_level(sub, lvl)
     }
@@ -419,12 +505,19 @@ impl OsBmwRefSketch {
         match self.dist {
             DistSpec::Pow2 { w_bits, max_cap } => {
                 // Top reachable level at precision P is `top = w_bits + 1`.
-                // When downsizing P -> P-1, block `j` (upper bit 0) lifts `top` -> `top + 1`!
+                // When downsizing P -> P-1, block `j` (upper bit 0) lifts `top` -> `top + 1`
+                // ONLY when `w_bits + 1 < max_cap` (top level is not yet saturated at `max_cap`).
                 let top = (w_bits as usize + 1).min(max_cap) as u8;
                 let new_w = (w_bits + 1).min(64);
+                let new_dist = DistSpec::Pow2 { w_bits: new_w, max_cap };
+                let new_pmf = PreimagePmf::build(new_dist);
+                let q_max = if self.q_bits >= 63 { usize::MAX } else { (1usize << self.q_bits) - 1 };
+                if new_pmf.k_reach > q_max {
+                    return Err(format!("downsized k_reach={} exceeds 2^{}-1", new_pmf.k_reach, self.q_bits));
+                }
                 let blocks = (0..half)
                     .map(|j| {
-                        let lifted_lo = if (w_bits as usize + 1) < max_cap {
+                        let lifted_lo = if (w_bits as usize + 1) < max_cap && (w_bits as usize + 1) < 63 {
                             self.blocks[j].lift_top_level(top)
                         } else {
                             self.blocks[j].clone()
@@ -434,18 +527,27 @@ impl OsBmwRefSketch {
                     .collect();
                 Ok(Self {
                     blocks,
-                    dist: DistSpec::Pow2 { w_bits: new_w, max_cap },
+                    dist: new_dist,
                     ..self.clone()
                 })
             }
             DistSpec::Pow2Div3 { p_tot } => {
+                if p_tot <= 1 {
+                    return Err("Cannot downsize Pow2Div3 with p_tot <= 1".to_string());
+                }
+                let new_dist = DistSpec::Pow2Div3 { p_tot: p_tot - 1 };
+                let new_pmf = PreimagePmf::build(new_dist);
+                let q_max = if self.q_bits >= 63 { usize::MAX } else { (1usize << self.q_bits) - 1 };
+                if new_pmf.k_reach > q_max {
+                    return Err(format!("downsized k_reach={} exceeds 2^{}-1", new_pmf.k_reach, self.q_bits));
+                }
                 let top = (64 - p_tot) as u8;
                 let blocks = (0..half)
                     .map(|j| self.blocks[j].lift_top_level(top).merge(&self.blocks[j + half]))
                     .collect();
                 Ok(Self {
                     blocks,
-                    dist: DistSpec::Pow2Div3 { p_tot: p_tot - 1 },
+                    dist: new_dist,
                     ..self.clone()
                 })
             }
@@ -454,6 +556,11 @@ impl OsBmwRefSketch {
     }
 
     pub fn estimate_ml(&self, pmf: &PreimagePmf) -> (f64, u32) {
+        assert_eq!(
+            pmf.spec, self.dist,
+            "estimate_ml: PreimagePmf {:?} does not match sketch dist {:?}",
+            pmf.spec, self.dist
+        );
         let mut ones_cnt = vec![0u32; pmf.k_reach + 1];
         let mut zero_lin = 0.0_f64;
         for blk in &self.blocks {
@@ -466,6 +573,11 @@ impl OsBmwRefSketch {
             };
             for r in 0..blk.g {
                 let u = us[r] as usize;
+                assert!(
+                    u <= pmf.k_reach,
+                    "register level u={} exceeds pmf.k_reach={}",
+                    u, pmf.k_reach
+                );
                 if u == 0 {
                     zero_lin += pmf.tail[win_lo - 1];
                 } else {

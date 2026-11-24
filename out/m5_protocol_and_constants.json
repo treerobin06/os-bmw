@@ -1,0 +1,130 @@
+{
+  "schema": "s1_osbmw_protocol_and_constants_v1",
+  "relative_sources": [
+    "s1_v2_rust/src/pmf.rs",
+    "s1_v2_rust/src/baselines.rs",
+    "s1_v2_rust/src/lib.rs",
+    "s1_v2_rust/src/bin/s1_v2_equal_error_hip.rs",
+    "s1_v2_rust/src/bin/s1_v2_accuracy.rs",
+    "s1_v2_rust/src/bin/s1_v2_reconcile.rs",
+    "s1_v2_datafusion/src/main.rs",
+    "out/env_info.json",
+    "out/official_hash4j_sys.tsv",
+    "out/official_datasketches_sys.tsv"
+  ],
+  "mle_solver": {
+    "source": "s1_v2_rust/src/pmf.rs",
+    "newton_max_iters": 40,
+    "newton_bracket_rel_tol": 1e-12,
+    "newton_score_rel_tol": 1e-14,
+    "initial_guess": "geometric_mean(lo, hi)",
+    "monotonic_bracket_fallback": true
+  },
+  "datafusion_sql_protocol": {
+    "source": "s1_v2_datafusion/src/main.rs",
+    "tag_single_hash_hex": "0xe1",
+    "single_hash_wire_bytes": 9,
+    "tag_exact_cell_sparse_hex": "0xe5",
+    "sparse_chunk_cap_cells": 30,
+    "sparse_chunk_bytes": 128,
+    "bootstrap_resamples_b": 2000,
+    "ci_level": 0.95,
+    "memory_reset_method": "malloc_trim(0) + write \"5\" to /proc/self/clear_refs",
+    "stage_consistency_audit": "Single vs Multi-Stage (p1_vs_p4 / p1_vs_p8 / p1_vs_p32) exact bit-level group check"
+  },
+  "baselines_and_rank_codec": {
+    "avll_base56": {
+      "source": "s1_v2_rust/src/baselines.rs",
+      "buckets_per_u64": 11,
+      "max_exp": 18,
+      "htl": 13,
+      "history_margin": 2,
+      "exact_preimage_regime": "Exact under prefill and bounded shifts without clamping/history eviction; approximate once clamping or history eviction activates"
+    },
+    "ull_fgra_hash4j_port": {
+      "source": "s1_v2_rust/src/baselines.rs",
+      "present": true,
+      "reference_library": "Dynatrace hash4j 0.22.0 OptimalFGRAEstimator (arXiv:2308.16862)",
+      "byte_bijection": "r_hash4j = r_rust + 4*p - 8 (0 -> 0; large-range sentinel u = 65 - p)"
+    },
+    "osbmw_rank_theoretical_wire": {
+      "g": 2048,
+      "k": 92,
+      "R": 7,
+      "d": 2,
+      "K_reach": 60,
+      "fixed_bytes": 1277
+    }
+  },
+  "accuracy_and_stream_protocols": {
+    "equal_byte_sweep_trials_per_cell": {
+      "budgets_0.5_1_4_kib": 2000,
+      "budgets_2_8_16_kib": 400,
+      "avll_hll4fixed_cap_above_1e5": 200
+    },
+    "poissonized_mc": {
+      "cards": [
+        100000.0,
+        10000000.0,
+        10000000000.0,
+        100000000000000.0
+      ],
+      "trials_per_point": 4000,
+      "total_trials_per_config": 16000
+    },
+    "hash64_vs_hash128_ablation_trials": 500,
+    "real_and_skewed_workloads": {
+      "synthetic_uniform_distinct": 2000000,
+      "zipf_domain_distinct": 2000000,
+      "zipf_stream_events": 5000000,
+      "multishard_reconcile_distinct_n": 2000000
+    }
+  },
+  "hardware_and_external_toolchains": {
+    "cpu_model": "Intel(R) Xeon(R) Gold 6430",
+    "os_uname": "Linux x86_64 (kernel 7.0.0-27-generic, Ubuntu SMP)",
+    "rustc_version": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+    "cargo_version": "cargo 1.100.0 (3acc79c0c 2026-11-05)",
+    "l3_cache_per_socket_kib": 61440,
+    "l3_cache_per_socket_mib": 60,
+    "l3_cache_total_mib": 120,
+    "sockets": 2,
+    "cores_per_socket_physical": 32,
+    "logical_cpus_total": 128,
+    "numa_nodes": 2,
+    "avx512_flags": [
+      "avx512_bf16",
+      "avx512_bitalg",
+      "avx512bw",
+      "avx512cd",
+      "avx512dq",
+      "avx512f",
+      "avx512_fp16",
+      "avx512ifma",
+      "avx512vbmi",
+      "avx512_vbmi2",
+      "avx512vl",
+      "avx512_vnni",
+      "avx512_vpopcntdq"
+    ],
+    "hash4j_version": "0.22.0",
+    "hash4j_sys_methods_measured": [
+      "Hash4j_HyperLogLog",
+      "Hash4j_UltraLogLog"
+    ],
+    "datasketches_cpp_commit": "1e49055d3f3dba9aa9ebc6d293a42c7bd8e53209",
+    "datasketches_sys_methods_measured": [
+      "Apache_CPC",
+      "Apache_HLL4_Dyn",
+      "Apache_HLL4_Full",
+      "Apache_HLL8_Dyn",
+      "Apache_HLL8_Full"
+    ]
+  },
+  "rust_verification_tests": {
+    "s1_v2_rust_lib": 29,
+    "s1_v2_equal_error_hip": 1,
+    "s1_v2_datafusion": 4,
+    "total": 34
+  }
+}

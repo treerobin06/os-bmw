@@ -1,0 +1,7 @@
+{
+  "avx512_compiled": true,
+  "arch": "x86_64",
+  "total_merges_checked": 12032,
+  "mismatches": 0,
+  "status": "PASS"
+}

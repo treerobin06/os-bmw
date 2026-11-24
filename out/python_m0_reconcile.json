@@ -1,0 +1,159 @@
+{
+  "configs": [
+    {
+      "method": "HLL_6bit_ML",
+      "bits_per_sub": 6.0,
+      "fisher_J_avg": 0.93044318,
+      "fisher_J_min": 0.93041761,
+      "fisher_J_max": 0.93046875,
+      "shannon_H_bits": 2.831953,
+      "fish_lower_bound": 3.04366,
+      "mvp_theory": 6.44854,
+      "mvp_phase_min": 6.44836,
+      "mvp_phase_max": 6.44872,
+      "uncompressed_over_entropy": 2.1187
+    },
+    {
+      "method": "ULL_8bit_ML",
+      "bits_per_sub": 8.0,
+      "fisher_J_avg": 1.72738083,
+      "fisher_J_min": 1.72728783,
+      "fisher_J_max": 1.72747384,
+      "shannon_H_bits": 3.993994,
+      "fish_lower_bound": 2.312168,
+      "mvp_theory": 4.63129,
+      "mvp_phase_min": 4.63104,
+      "mvp_phase_max": 4.63154,
+      "uncompressed_over_entropy": 2.003
+    },
+    {
+      "method": "ELL_2_20_28bit",
+      "bits_per_sub": 28.0,
+      "fisher_J_avg": 7.57380617,
+      "fisher_J_min": 7.57338265,
+      "fisher_J_max": 7.57422969,
+      "shannon_H_bits": 16.754846,
+      "fish_lower_bound": 2.212209,
+      "mvp_theory": 3.69695,
+      "mvp_phase_min": 3.69675,
+      "mvp_phase_max": 3.69716,
+      "uncompressed_over_entropy": 1.6712
+    },
+    {
+      "method": "ELL_2_24_32bit",
+      "bits_per_sub": 32.0,
+      "fisher_J_avg": 8.429108,
+      "fisher_J_min": 8.42859189,
+      "fisher_J_max": 8.42962411,
+      "shannon_H_bits": 17.703923,
+      "fish_lower_bound": 2.100332,
+      "mvp_theory": 3.79637,
+      "mvp_phase_min": 3.79614,
+      "mvp_phase_max": 3.7966,
+      "uncompressed_over_entropy": 1.8075
+    },
+    {
+      "method": "OSBMW_g128_k8_88B",
+      "bits_per_sub": 5.5,
+      "fisher_J_avg": 1.72065179,
+      "fisher_J_min": 1.72033849,
+      "fisher_J_max": 1.72096512,
+      "shannon_H_bits": 3.991296,
+      "fish_lower_bound": 2.319642,
+      "mvp_theory": 3.19646,
+      "mvp_phase_min": 3.19588,
+      "mvp_phase_max": 3.19705,
+      "uncompressed_over_entropy": 1.378
+    },
+    {
+      "method": "OSBMW_5b_g512_k24",
+      "bits_per_sub": 5.375,
+      "fisher_J_avg": 1.71933874,
+      "fisher_J_min": 1.71707435,
+      "fisher_J_max": 1.72157677,
+      "shannon_H_bits": 3.991477,
+      "fish_lower_bound": 2.321519,
+      "mvp_theory": 3.1262,
+      "mvp_phase_min": 3.12214,
+      "mvp_phase_max": 3.13032,
+      "uncompressed_over_entropy": 1.3466
+    },
+    {
+      "method": "OSBMW_5b_Mask_k20",
+      "bits_per_sub": 5.375,
+      "fisher_J_avg": 1.70590975,
+      "fisher_J_min": 1.70190237,
+      "fisher_J_max": 1.70989657,
+      "shannon_H_bits": 3.985971,
+      "fish_lower_bound": 2.336566,
+      "mvp_theory": 3.15081,
+      "mvp_phase_min": 3.14346,
+      "mvp_phase_max": 3.15823,
+      "uncompressed_over_entropy": 1.3485
+    },
+    {
+      "method": "OSBMW_5b_256B_g384",
+      "bits_per_sub": 5.333333,
+      "fisher_J_avg": 1.70889519,
+      "fisher_J_min": 1.70640766,
+      "fisher_J_max": 1.71137997,
+      "shannon_H_bits": 3.987003,
+      "fish_lower_bound": 2.333088,
+      "mvp_theory": 3.12092,
+      "mvp_phase_min": 3.11639,
+      "mvp_phase_max": 3.12547,
+      "uncompressed_over_entropy": 1.3377
+    },
+    {
+      "method": "OSBMW_Chunk_656B",
+      "bits_per_sub": 5.125,
+      "fisher_J_avg": 1.69264146,
+      "fisher_J_min": 1.68492508,
+      "fisher_J_max": 1.70007689,
+      "shannon_H_bits": 3.903364,
+      "fish_lower_bound": 2.306079,
+      "mvp_theory": 3.02781,
+      "mvp_phase_min": 3.01457,
+      "mvp_phase_max": 3.04168,
+      "uncompressed_over_entropy": 1.313
+    },
+    {
+      "method": "OSBMW_Rank_Wire1277B",
+      "bits_per_sub": 4.988281,
+      "fisher_J_avg": 1.66405546,
+      "fisher_J_min": 1.64274822,
+      "fisher_J_max": 1.68086244,
+      "shannon_H_bits": 3.783398,
+      "fish_lower_bound": 2.273601,
+      "mvp_theory": 2.99767,
+      "mvp_phase_min": 2.96769,
+      "mvp_phase_max": 3.03655,
+      "uncompressed_over_entropy": 1.3185
+    }
+  ],
+  "reconciliation": {
+    "K_59": {
+      "log2_states": 10206.3544,
+      "exact_bits": 10207,
+      "fixed_bytes": 1276,
+      "bit_mvp": 2.99502,
+      "byte_mvp": 2.99532
+    },
+    "K_60": {
+      "log2_states": 10208.8652,
+      "exact_bits": 10209,
+      "fixed_bytes": 1277,
+      "bit_mvp": 2.99561,
+      "byte_mvp": 2.99767
+    },
+    "K_63": {
+      "log2_states": 10216.1238,
+      "exact_bits": 10217,
+      "fixed_bytes": 1278,
+      "bit_mvp": 2.99796,
+      "byte_mvp": 3.00001
+    },
+    "independent_q6_mvp": 3.00606,
+    "explanation": "3.00606 is the naive independent field-sum bound (6 + 2048*log2(25) + 91*8 = 10244.62 bits) at q=6 (K=63), which counts sentinel-25 on normal slots, ignores u_r > anchor on overflows, and retains unreachable levels 61..63. Under the exact 64-bit preimage support K_reach=60, exact combinatorial ranking (OS-BMW-Rank) uses 10,209 bits = 1,277 B/block (10,216 bits), yielding a deterministic, zero-entropy-coding Wire MVP of 2.99767 < 3.00 (and 2.99532 at K_reach=59). Note that <3.00 applies strictly to the deterministic cold-storage wire codec (Theorem 4), not active RAM."
+  }
+}

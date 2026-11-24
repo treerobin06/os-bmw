@@ -2,6 +2,7 @@
 name = "s1_v2_datafusion"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.94"
 
 [dependencies]
 s1_v2_rust = { path = "../s1_v2_rust" }

@@ -3,7 +3,7 @@
 Milestone M0 Independent Python Verification & Reconciliation Script:
   1. Independently recomputes exact 64-bit integer preimage PMFs (zero Rust code shared!)
      via monotone binary search and checks exact closure sum(c_k) == 2^w_bits.
-  2. Reconciles the Round-2 SUMMARY.json vs PRE_EXPERIMENT_GATE.md discrepancy:
+  2. Reconciles the fixed-byte wire MVP bounds (Theorem 4):
        - q=6 naive independent field sum (3.00606 > 3.00)
        - Exact combinatorial fixed-byte OS-BMW-Rank Wire codec at K_reach=60 (1,277 B -> 2.99767 < 3.00)
        - Exact floor K_reach=59 (1,276 B -> 2.99532 < 3.00)
@@ -302,7 +302,7 @@ def main():
         "which counts sentinel-25 on normal slots, ignores u_r > anchor on overflows, and retains unreachable levels 61..63. "
         "Under the exact 64-bit preimage support K_reach=60, exact combinatorial ranking (OS-BMW-Rank) uses 10,209 bits = 1,277 B/block "
         "(10,216 bits), yielding a deterministic, zero-entropy-coding Wire MVP of 2.99767 < 3.00 (and 2.99532 at K_reach=59). "
-        "Per ac-kill-reviewer A3, <3.00 is strictly reported as an Appendix Existence Theorem / Cold-Storage Wire Codec, never as RAM."
+        "Note that <3.00 applies strictly to the deterministic cold-storage wire codec (Theorem 4), not active RAM."
     )
 
     out_json = out_dir / "python_m0_reconcile.json"

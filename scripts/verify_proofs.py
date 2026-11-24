@@ -12,8 +12,8 @@ Verifies by exact arithmetic / brute-force enumeration / numerical proof checks:
           whereas single 64-bit dyadic Pow2 requires lifting u_top -> u_top + 1 on j < 2^(p-1).
       Note: OsBmwHybrid (V_BITS=25 sparse wrapper) is explicitly excluded from Theorem 1.
   - Generalized Theorem 2 (Counting Impossibility, High-Tier Associativity, & Overflow-Avoidance iff):
-      (a) Reproduces Codex's 4-state counterexample (g=r=3, W=2, K_max=4, C_ex=1) proving that
-          "which exception is retained" carries information, and verifies the new exact counting
+      (a) Verifies the minimal 4-state counterexample (g=r=3, W=2, K_max=4, C_ex=1) proving that
+          "which exception is retained" carries information, and verifies the exact counting
           condition sum_{j=0}^{C_ex} C(t, j) m^j < m^t (m = min(K_max - W, W + 1)) is False there;
       (b) Evaluates the exact counting condition on real sketches (AVLL/DLL W=18 C=0, HLL_4-Fixed
           W=14 cap=1/4/32, Median/Quartile anchors) and reports minimal valid t in [C_ex+1, r_ord-1];
@@ -47,6 +47,11 @@ from itertools import product
 from pathlib import Path
 import numpy as np
 
+
+
+def require(cond: bool, msg: str = "Verification failed") -> None:
+    if not cond:
+        raise AssertionError(msg)
 
 def verify_theorem_1():
     """Verify Pettie-Wang Def. 8 linearization, join-semilattice homomorphism, and 2x-downsizing rules."""
@@ -97,11 +102,11 @@ def verify_theorem_1():
     sig_to_state = {}
     for st, sg in zip(states, vis_sigs):
         if st in state_to_sig:
-            assert state_to_sig[st] == sg, "Linearization mismatch: same state, different visible cells!"
+            require(state_to_sig[st] == sg, "Linearization mismatch: same state, different visible cells!")
         else:
             state_to_sig[st] = sg
         if sg in sig_to_state:
-            assert sig_to_state[sg] == st, "Linearization mismatch: same visible cells, different state!"
+            require(sig_to_state[sg] == st, "Linearization mismatch: same visible cells, different state!")
         else:
             sig_to_state[sg] = st
 
@@ -114,7 +119,7 @@ def verify_theorem_1():
         for j in range(512):
             bs_union = tuple(all_inputs[i][r] | all_inputs[j][r] for r in range(g))
             rep_union = tuple(rep[states[i]][r] | rep[states[j]][r] for r in range(g))
-            assert project(bs_union) == project(rep_union)
+            require(project(bs_union) == project(rep_union), "Verification failed at line 117")
             hom_checks += 1
 
     # Part 4 check: 128-bit domain-separated downsizing (NO lift) vs 64-bit Pow2 downsizing (WITH lift)
@@ -122,11 +127,11 @@ def verify_theorem_1():
     #    In 128-bit mode, h_hi = 2^11 has nlz = 64 - 12 = 52 -> lvl = 53 for BOTH p=3 and p=2!
     h_lo_128, h_hi_128 = 0, 1 << 11
     lvl_128 = (64 - h_hi_128.bit_length()) + 1  # 53
-    assert lvl_128 == 53
+    require(lvl_128 == 53, "Verification failed at line 125")
     blk_p3 = (h_lo_128 >> 9) & 7
     blk_p2_direct = (h_lo_128 >> 9) & 3
     blk_p2_merged = blk_p3 & 3  # merging block j with block j + 4 without lifting
-    assert blk_p2_merged == blk_p2_direct and lvl_128 == 53
+    require(blk_p2_merged == blk_p2_direct and lvl_128 == 53, "Verification failed at line 129")
 
     # 2) Single 64-bit Pow2 mode: exhaustive check on small 8-bit toy hash (s_sub=1, p=2 -> p=1)
     s_toy, p_toy = 1, 2
@@ -145,7 +150,7 @@ def verify_theorem_1():
         # Downsize rule: lift u_top -> u_top + 1 ONLY on half-blocks j < 2^(p-1)
         blk_lo_down = blk_hi & ((1 << (p_toy - 1)) - 1)
         lvl_lo_down = (lvl_hi + 1) if (blk_hi < (1 << (p_toy - 1)) and lvl_hi == u_top_toy) else lvl_hi
-        assert blk_lo_down == blk_lo_direct and lvl_lo_down == lvl_lo_direct
+        require(blk_lo_down == blk_lo_direct and lvl_lo_down == lvl_lo_direct, "Verification failed at line 148")
 
     return {
         "passed": True,
@@ -165,16 +170,25 @@ def _counting_lhs(t: int, C_ex: int, m: int) -> int:
 def _evaluate_counting_condition(r_ord: int, W: int, C_ex: int, K_max: int, margin: int = 0):
     """
     Evaluate the exact counting inequality of Generalized Theorem 2 Part 1:
-      exists t in [C_ex + 1, r_ord - 1] such that sum_{j=0}^{C_ex} C(t, j) * m^j < m^t,
-    where m = min(K_max - W, W + 1 - margin).
+      requires m_mu >= 1 and margin + m_mu - 1 <= W (where m_mu = min(K_max - W, W + 1 - margin)),
+      plus exists t in [C_ex + 1, r_ord - 1] such that sum_{j=0}^{C_ex} C(t, j) * m_mu^j < m_mu^t.
     """
     m = min(K_max - W, W + 1 - margin)
     t_lo = C_ex + 1
     t_hi = r_ord - 1
-    if m <= 1 or t_lo > t_hi:
+    preconditions_met = (
+        (1 <= W <= K_max - 1)
+        and (0 <= C_ex < r_ord - 1)
+        and (margin >= 0)
+        and (m >= 1)
+        and (margin + m - 1 <= W)
+    )
+    if (not preconditions_met) or m <= 1 or t_lo > t_hi:
         return {
             "holds": False,
+            "preconditions_met": preconditions_met,
             "m": m,
+            "margin_plus_m_minus_1": margin + m - 1,
             "t_range": [t_lo, t_hi],
             "min_t": None,
         }
@@ -191,7 +205,9 @@ def _evaluate_counting_condition(r_ord: int, W: int, C_ex: int, K_max: int, marg
     rhs_c1 = m ** t_lo
     res = {
         "holds": min_t is not None,
+        "preconditions_met": preconditions_met,
         "m": m,
+        "margin_plus_m_minus_1": margin + m - 1,
         "t_range": [t_lo, t_hi],
         "min_t": min_t,
         "t_eq_C_plus_1_ratio_1_plus_inv_m_pow": round((1.0 + 1.0 / m) ** (C_ex + 1), 6),
@@ -280,7 +296,7 @@ def _verify_toy_part2_associativity():
             C = proj((0, 1 << margin))
             lhs_c = merge(merge(A, B), C)
             rhs_c = merge(A, merge(B, C))
-            assert lhs_c != rhs_c
+            require(lhs_c != rhs_c, "Verification failed at line 294")
             canon_viol = {
                 "A_levels": [H + 1, 0],
                 "B_levels": [H, 0],
@@ -303,10 +319,10 @@ def _verify_toy_part2_associativity():
     m1_no_viol = run_toy(W=4, H=3, d=1, margin=1)
     m1_viol = run_toy(W=4, H=2, d=1, margin=1)
 
-    assert not m0_no_viol["associativity_violated"]
-    assert m0_viol["associativity_violated"]
-    assert not m1_no_viol["associativity_violated"]
-    assert m1_viol["associativity_violated"]
+    require(not m0_no_viol["associativity_violated"], "Verification failed at line 317")
+    require(m0_viol["associativity_violated"], "Verification failed at line 318")
+    require(not m1_no_viol["associativity_violated"], "Verification failed at line 319")
+    require(m1_viol["associativity_violated"], "Verification failed at line 320")
 
     return {
         "H_eq_W_minus_1_zero_violations_margin0": m0_no_viol,
@@ -320,67 +336,81 @@ def _verify_toy_part2_associativity():
 def verify_generalized_theorem_2():
     """
     Verify Generalized Theorem 2 (Parts 1–3):
-      - Part 1: Codex 4-state counterexample + exact counting condition on Codex & real params
+      - Part 1: Minimal 4-state counterexample + exact counting condition on toy & real params
                 + generic saturating partition-homomorphism witnesses;
       - Part 2: Exhaustive toy verification of H = W - 1 (no violation) vs H <= W - 2 (violation);
       - Part 3: Exhaustive & randomized verification of zero-eviction iff r_ord <= C_ex + 1.
     """
-    # 1A. Reproduce Codex 4-state counterexample (g=r_ord=3, W=2, K_max=4, C_ex=1)
+    # 1A. Verify minimal 4-state counterexample (g=r_ord=3, W=2, K_max=4, C_ex=1)
     g_cx, r_cx, W_cx, K_cx, C_cx = 3, 3, 2, 4, 1
-    codex_inputs = [(3, 3, 0), (3, 4, 0), (4, 3, 0), (4, 4, 0)]
-    codex_map = {}
-    for u in codex_inputs:
+    four_state_inputs = [(3, 3, 0), (3, 4, 0), (4, 3, 0), (4, 4, 0)]
+    four_state_map = {}
+    for u in four_state_inputs:
         anchor = sorted(u, reverse=True)[r_cx - 1]
-        assert anchor == 0
-        # Codex retention policy: retain bucket 0 if u[0] == u[1], else retain bucket 1; saturate other to A+W=2
+        require(anchor == 0, "Verification failed at line 345")
+        # Deterministic retention policy: retain bucket 0 if u[0] == u[1], else retain bucket 1; saturate other to A+W=2
         if u[0] == u[1]:
             state = (u[0], anchor + W_cx, u[2])
         else:
             state = (anchor + W_cx, u[1], u[2])
-        codex_map[str(u)] = list(state)
-    distinct_codex_states = set(tuple(v) for v in codex_map.values())
-    assert len(distinct_codex_states) == 4
-    codex_cond = _evaluate_counting_condition(r_cx, W_cx, C_cx, K_cx)
-    assert codex_cond["holds"] is False
-    assert codex_cond["states_bound_at_C_plus_1"] == 5 and codex_cond["inputs_at_C_plus_1"] == 4
+        four_state_map[str(u)] = list(state)
+    distinct_four_states = set(tuple(v) for v in four_state_map.values())
+    require(len(distinct_four_states) == 4, "Verification failed at line 353")
+    four_state_cond = _evaluate_counting_condition(r_cx, W_cx, C_cx, K_cx)
+    require(four_state_cond["holds"] is False, "Verification failed at line 355")
+    require(four_state_cond["states_bound_at_C_plus_1"] == 5 and four_state_cond["inputs_at_C_plus_1"] == 4, "Verification failed at line 356")
 
-    codex_4state_counterexample = {
+    minimal_4state_counterexample = {
         "params": {"g": g_cx, "r_ord": r_cx, "W": W_cx, "K_max": K_cx, "C_ex": C_cx},
-        "input_to_state_map": codex_map,
-        "distinct_states_produced": len(distinct_codex_states),
-        "all_4_inputs_distinguished": len(distinct_codex_states) == 4,
-        "counting_condition": codex_cond,
+        "input_to_state_map": four_state_map,
+        "distinct_states_produced": len(distinct_four_states),
+        "all_4_inputs_distinguished": len(distinct_four_states) == 4,
+        "counting_condition": four_state_cond,
     }
 
-    # 1B. Evaluate exact counting condition across Codex & real parameters
+    # 1B. Evaluate exact counting condition across minimal, degenerate-margin, & real parameters
     audit_specs = [
-        ("Codex_Counterexample",     3,    3, 2,  1, 4,  0, False),
-        ("AVLL_DLL_Cap0_K60",       11,   11, 18, 0, 60, 0, True),
-        ("AVLL_Margin2_Cap0_K60",   11,   11, 18, 0, 60, 2, True),
-        ("HLL4_Fixed_Cap1_g4",       4,    4, 14, 1, 60, 0, True),
-        ("HLL4_Fixed_Cap1_g1024", 1024, 1024, 14, 1, 60, 0, True),
-        ("HLL4_Fixed_Cap4_g16",     16,   16, 14, 4, 60, 0, True),
+        ("Minimal_4State_Boundary",   3,    3, 2,  1, 4,  0, False),
+        ("Degenerate_Margin_W1_mu4",  3,    3, 1,  0, 4,  4, False),
+        ("AVLL_DLL_Cap0_K60",        11,   11, 18, 0, 60, 0, True),
+        ("AVLL_Margin2_Cap0_K60",    11,   11, 18, 0, 60, 2, True),
+        ("HLL4_Fixed_Cap1_g4",        4,    4, 14, 1, 60, 0, True),
+        ("HLL4_Fixed_Cap1_g1024",  1024, 1024, 14, 1, 60, 0, True),
+        ("HLL4_Fixed_Cap4_g16",      16,   16, 14, 4, 60, 0, True),
         ("HLL4_Fixed_Cap32_g1024", 1024, 1024, 14, 32, 60, 0, True),
-        ("Median_Anchor_Fixed",     16,    8, 12, 5, 60, 0, True),
-        ("Quartile_Anchor_Fixed",   32,    8, 10, 6, 60, 0, True),
+        ("Median_Anchor_Fixed",      16,    8, 12, 5, 60, 0, True),
+        ("Quartile_Anchor_Fixed",    32,    8, 10, 6, 60, 0, True),
     ]
     counting_audit = []
     for name, g_v, r_v, W_v, C_v, K_v, mu_v, expected in audit_specs:
         ev = _evaluate_counting_condition(r_v, W_v, C_v, K_v, margin=mu_v)
-        assert ev["holds"] is expected, f"Unexpected counting condition for {name}: {ev}"
+        require(ev["holds"] is expected, f"Unexpected counting condition for {name}: {ev}")
+        if expected:
+            require(ev["preconditions_met"] and ev["m"] >= 1 and ev["margin_plus_m_minus_1"] <= W_v, "Verification failed at line 384")
         counting_audit.append({
             "case": name,
             "g": g_v, "r_ord": r_v, "W": W_v, "C_ex": C_v, "K_max": K_v, "margin": mu_v,
             **ev,
         })
-    # Verify expected minimal t values explicitly
+    # Verify expected minimal t values & margin boundary preconditions explicitly
     by_case = {e["case"]: e for e in counting_audit}
-    assert by_case["AVLL_DLL_Cap0_K60"]["min_t"] == 1
-    assert by_case["AVLL_Margin2_Cap0_K60"]["min_t"] == 1
-    assert by_case["HLL4_Fixed_Cap1_g4"]["min_t"] == 2
-    assert by_case["HLL4_Fixed_Cap1_g1024"]["min_t"] == 2
-    assert by_case["HLL4_Fixed_Cap4_g16"]["min_t"] == 5
-    assert by_case["HLL4_Fixed_Cap32_g1024"]["min_t"] == 37
+    require(by_case["Degenerate_Margin_W1_mu4"]["m"] == -2, "Verification failed at line 392")
+    require(by_case["Degenerate_Margin_W1_mu4"]["preconditions_met"] is False, "Verification failed at line 393")
+    # Exhaustively confirm the degenerate margin case (g=r_ord=3, W=1, K_max=mu=4, C_ex=0) is exactly mergeable
+    deg_inputs = list(product(range(5), repeat=3))
+    deg_proj = {u: (max(0, min(u) - 4), tuple(min(x, 1) for x in u)) for u in deg_inputs}
+    require(len(deg_inputs) == 125 and len(set(deg_proj.values())) == 8, "Verification failed at line 397")
+    for u in deg_inputs:
+        for v in deg_inputs:
+            uv = tuple(max(a, b) for a, b in zip(u, v))
+            m_uv = (0, tuple(max(a, b) for a, b in zip(deg_proj[u][1], deg_proj[v][1])))
+            require(deg_proj[uv] == m_uv, "Verification failed at line 402")
+    require(by_case["AVLL_DLL_Cap0_K60"]["min_t"] == 1 and by_case["AVLL_DLL_Cap0_K60"]["preconditions_met"] is True, "Verification failed at line 403")
+    require(by_case["AVLL_Margin2_Cap0_K60"]["min_t"] == 1 and by_case["AVLL_Margin2_Cap0_K60"]["preconditions_met"] is True, "Verification failed at line 404")
+    require(by_case["HLL4_Fixed_Cap1_g4"]["min_t"] == 2, "Verification failed at line 405")
+    require(by_case["HLL4_Fixed_Cap1_g1024"]["min_t"] == 2, "Verification failed at line 406")
+    require(by_case["HLL4_Fixed_Cap4_g16"]["min_t"] == 5, "Verification failed at line 407")
+    require(by_case["HLL4_Fixed_Cap32_g1024"]["min_t"] == 37, "Verification failed at line 408")
 
     # 1C. Generic saturating partition-homomorphism witnesses (FIFO retention + elementwise-max merge)
     # Note: Bottom_HLL4_Fixed gives 18 != 14 here; concrete Rust witnesses (HLL4_Fixed g=4 cap=1 -> 20 != 14
@@ -393,8 +423,8 @@ def verify_generalized_theorem_2():
     ]
     results = []
     for name, g, r_ord, W, C_ex, K_max in cases:
-        assert C_ex < r_ord - 1
-        assert W + 4 <= K_max
+        require(C_ex < r_ord - 1, "Verification failed at line 421")
+        require(W + 4 <= K_max, "Verification failed at line 422")
         L_hi = W + 4
         L_lift = 4
 
@@ -422,9 +452,9 @@ def verify_generalized_theorem_2():
             uBA = insert_generic(uBA, C_ex, j, L_hi)
         uM = tuple(max(uA[j], uB[j]) for j in range(g))
 
-        assert uBA[C_ex] == L_hi
-        assert uM[C_ex] == W < L_hi
-        assert uM != uBA
+        require(uBA[C_ex] == L_hi, "Verification failed at line 450")
+        require(uM[C_ex] == W < L_hi, "Verification failed at line 451")
+        require(uM != uBA, "Verification failed at line 452")
         results.append({
             "case": name,
             "g": g, "anchor_order_r": r_ord, "W": W, "C_ex": C_ex,
@@ -446,10 +476,10 @@ def verify_generalized_theorem_2():
             over = sum(1 for x in u if x > anc + W_p3)
             if over > max_over:
                 max_over = over
-        assert max_over == r_ord - 1
+        require(max_over == r_ord - 1, "Verification failed at line 474")
         for C_ex in range(0, g_p3):
             no_eviction_all_inputs = (max_over <= C_ex)
-            assert no_eviction_all_inputs == (r_ord <= C_ex + 1)
+            require(no_eviction_all_inputs == (r_ord <= C_ex + 1), "Verification failed at line 477")
             iff_checks += 1
 
     # Also verify top-k tightness (r_ord = k = C_ex + 1, W = 0) on larger (g, k)
@@ -461,12 +491,12 @@ def verify_generalized_theorem_2():
             B = int(np.sort(u)[::-1][k - 1])
             exc = int(np.sum(u > B))
             max_exc = max(max_exc, exc)
-            assert exc <= k - 1
-        assert max_exc == k - 1  # tight!
+            require(exc <= k - 1, "Verification failed at line 489")
+        require(max_exc == k - 1, "Verification failed at line 490")  # tight!
 
     return {
         "passed": True,
-        "codex_4state_counterexample": codex_4state_counterexample,
+        "minimal_4state_counterexample": minimal_4state_counterexample,
         "counting_condition_audit": counting_audit,
         "witness_cases": results,
         "part2_high_tier_history_boundary": part2_boundary,
@@ -474,7 +504,7 @@ def verify_generalized_theorem_2():
         "top_k_tight_bound_verified": True,
         "witness_attribution_note": (
             "Python verifies the generic saturating witnesses (Bottom_HLL4_Fixed 18/14, Bottom_AVLL_Cap0 22/18, "
-            "Median/Quartile anchors), Codex's 4-state counterexample, and the toy H=W-1 vs H<=W-2 associativity "
+            "Median/Quartile anchors), the minimal 4-state boundary counterexample, and the toy H=W-1 vs H<=W-2 associativity "
             "boundary; concrete Rust implementation witnesses (AVLL 11-bucket 47/49, HLL_4-Fixed g=4 cap=1 20/14) "
             "are verified in s1_v2_rust/src/lib.rs."
         ),
@@ -554,6 +584,7 @@ def verify_theorem_3():
             state_dp[key] = state_dp.get(key, 0.0) + dpj
 
         pmf_sum = sum(state_p.values())
+        require(math.isfinite(pmf_sum), f"Non-finite PMF sum: {pmf_sum}")
         max_pmf_sum_err = max(max_pmf_sum_err, abs(pmf_sum - 1.0))
         for (B, proj), p_true in state_p.items():
             win_lo = max(1, B - R + 1)
@@ -570,11 +601,16 @@ def verify_theorem_3():
                             p_fact *= -math.expm1(-lam * probs[j])
                         else:
                             p_fact *= math.exp(-lam * probs[j])
-            assert abs(p_fact - p_true) < 1e-13 * max(1.0, p_true), "Factorization failed!"
+            require(abs(p_fact - p_true) < 1e-13 * max(1.0, p_true), "Factorization failed!")
 
         J_bf = sum((lam * state_dp[key]) ** 2 / state_p[key] for key in state_p if state_p[key] > 1e-300) / g
         H_bf = -sum(p * math.log2(p) for p in state_p.values() if p > 1e-300) / g
         J_th, H_th = exact_osbmw_fisher_and_entropy(probs, g, k, R, d, lam)
+        require(
+            math.isfinite(J_bf) and J_bf > 0.0 and math.isfinite(J_th)
+            and math.isfinite(H_bf) and H_bf > 0.0 and math.isfinite(H_th),
+            f"Non-finite Fisher/entropy values: J_bf={J_bf}, J_th={J_th}, H_bf={H_bf}, H_th={H_th}",
+        )
         max_fisher_err = max(max_fisher_err, abs(J_bf - J_th) / J_bf)
         max_entropy_err = max(max_entropy_err, abs(H_bf - H_th) / H_bf)
 
@@ -582,8 +618,8 @@ def verify_theorem_3():
     xs = np.logspace(-8, 2, 1000)
     d2_lam = -(xs ** 2) * np.exp(-xs) / ((-np.expm1(-xs)) ** 2)
     d2_theta = xs * (np.expm1(xs) - xs * np.exp(xs)) / (np.expm1(xs) ** 2)
-    assert np.all(d2_lam < 0.0)
-    assert np.all(d2_theta < 0.0)
+    require(np.all(d2_lam < 0.0), "Verification failed at line 610")
+    require(np.all(d2_theta < 0.0), "Verification failed at line 611")
 
     # Part 4 discrete preimage boundary checks:
     # 1) Pow2Div3 at P = 11 (6,144 sub-buckets): Q = floor(2^64/3), Q mod 2048 = 1365, excluded = 4096
@@ -593,7 +629,7 @@ def verify_theorem_3():
     n_rem = Q_div3 >> P_div3
     excluded_raw = (1 << 64) - 3 * (1 << P_div3) * n_rem
     km_div3, c_div3, _ = build_exact_preimage_pmf_div3(P_div3)
-    assert q_mod == 1365 and excluded_raw == 4096 and sum(c_div3[1:]) == n_rem
+    require(q_mod == 1365 and excluded_raw == 4096 and sum(c_div3[1:]) == n_rem, "Verification failed at line 621")
 
     # 2) GeomExactFloor exact integer thresholds for b = 17/8, W = 64
     dom64 = 1 << 64
@@ -611,9 +647,13 @@ def verify_theorem_3():
     t1_f64 = int(float(dom64) * (2.125 ** -1))
     k_reach_floor = len(thresh_exact) - 1
     counts_floor = [thresh_exact[j - 1] - thresh_exact[j] for j in range(1, k_reach_floor + 1)]
-    assert t1_exact == 8680820740569200760
-    assert t1_exact - t1_f64 == 120
-    assert k_reach_floor == 59 and sum(counts_floor) == dom64
+    require(t1_exact == 8680820740569200760, "Verification failed at line 639")
+    require(t1_exact - t1_f64 == 120, "Verification failed at line 640")
+    require(k_reach_floor == 59 and sum(counts_floor) == dom64, "Verification failed at line 641")
+
+    require(math.isfinite(max_pmf_sum_err) and max_pmf_sum_err < 1e-13, f"PMF sum error too large: {max_pmf_sum_err}")
+    require(math.isfinite(max_fisher_err) and max_fisher_err < 1e-12, f"Fisher relative error too large: {max_fisher_err}")
+    require(math.isfinite(max_entropy_err) and max_entropy_err < 1e-12, f"Entropy relative error too large: {max_entropy_err}")
 
     return {
         "passed": True,
@@ -651,11 +691,11 @@ def verify_theorem_4():
     k_rank = 92
     d_rank = 2
     k60, c60, p60, _ = build_exact_preimage_pmf_geom(2.125, 64, 63)
-    assert k60 == 60 and c60[60] == 1
+    require(k60 == 60 and c60[60] == 1, "Verification failed at line 683")
 
     total, log2_s, bits_int, bytes_int = combinatorial_rank_size(g_rank, k_rank, R_rank, d_rank, k60)
-    assert bits_int == 10209 and bytes_int == 1277
-    assert abs(log2_s - 10208.865166991258) < 1e-9
+    require(bits_int == 10209 and bytes_int == 1277, "Verification failed at line 686")
+    require(abs(log2_s - 10208.865166991258) < 1e-9, "Verification failed at line 687")
 
     n_phases = 64
     js = [
@@ -670,11 +710,11 @@ def verify_theorem_4():
     mvp_hdr_2blk = ((2 * bytes_int + 8) * 8 / (2.0 * g_rank)) / J_avg
     mvp_hdr_1blk = ((bytes_int + 8) * 8 / float(g_rank)) / J_avg
 
-    assert mvp_raw_j_avg < 3.0
-    assert gt3_count == 28
-    assert abs(mvp_hdr_2blk - 3.007055) < 1e-5
+    require(mvp_raw_j_avg < 3.0, "Verification failed at line 702")
+    require(gt3_count == 28, "Verification failed at line 703")
+    require(abs(mvp_hdr_2blk - 3.007055) < 1e-5, "Verification failed at line 704")
     max_promotions = k60 - R_rank
-    assert max_promotions == 53
+    require(max_promotions == 53, "Verification failed at line 706")
 
     return {
         "passed": True,
@@ -723,7 +763,7 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(res, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(res, indent=2))
-    assert all_passed
+    require(all_passed, "Verification failed at line 755")
     print("\nALL FOUR THEOREMS VERIFIED BY EXACT EXHAUSTIVE/NUMERICAL CHECKS!")
 
 

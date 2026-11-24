@@ -1,6 +1,6 @@
 /s1_v2_rust/target/
 /s1_v2_datafusion/target/
-/out/
+/reproduced/
 __pycache__/
 *.pyc
 .DS_Store

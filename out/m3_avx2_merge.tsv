@@ -1,0 +1,10 @@
+target_tag	arch	avx512_compiled	merge_path	method	ram_bytes	merge_eq_ns	merge_skew_ns
+yao_avx2	x86_64	false	compiled_portable	OS-BMW-5b(k24)	2760	12032.6	9278.3
+yao_avx2	x86_64	false	compiled_portable	OS-BMW-5b(k24,16blk)	5512	24320.8	22151.6
+yao_avx2	x86_64	false	compiled_portable	OS-BMW-5b-256B	4104	17978.0	6480.4
+yao_avx2	x86_64	false	explicit_scalar	OS-BMW-5b(k24)_scalar	2760	12020.2	11604.1
+yao_avx2	x86_64	false	explicit_scalar	OS-BMW-5b-256B_scalar	4104	18227.9	18260.1
+yao_avx2	x86_64	false	compiled_portable	ELL(2,24)	4104	870.8	861.4
+yao_avx2	x86_64	false	compiled_portable	ULL	4104	783.9	772.2
+yao_avx2	x86_64	false	compiled_portable	CPC(lgK=11)	4120	7983.0	617.5
+yao_avx2	x86_64	false	compiled_portable	HLL_4(dyn)	2152	23758.4	10455.4

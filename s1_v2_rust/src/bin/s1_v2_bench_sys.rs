@@ -80,7 +80,7 @@ fn main() {
     let pmf_chunk = PreimagePmf::build(DistSpec::GeomNegLog2 { b: 2.05, w_bits: 64 - 2 - 10, max_cap: 63 });
     let pmf_ell = PreimagePmf::build(DistSpec::ErtlT { t: 2, w_bits: 64 - 10 });
     let pmf_ull = PreimagePmf::build(DistSpec::Pow2 { w_bits: 64 - 12, max_cap: 63 });
-    let pmf_avll = PreimagePmf::build(DistSpec::Pow2 { w_bits: 64, max_cap: 63 });
+    let pmf_hll13 = PreimagePmf::build(DistSpec::Pow2 { w_bits: 64 - 13, max_cap: 63 });
     let pmf_cpc = PreimagePmf::build(DistSpec::Pow2 { w_bits: 64 - 11, max_cap: 63 });
 
     // Pre-generate 2,000,000 raw item keys (streaming hashes computed INSIDE the timed loop so hash cost is identical!)
@@ -105,6 +105,7 @@ fn main() {
         l1_steady_1e7_ns: f64,
         dram_4096_steady_ns: f64,
         dram_4096_cold_ns: f64,
+        dram_65536_steady_ns: f64,
         merge_equal_ns: f64,
         merge_skew_ns: f64,
         est_ml_us: f64,
@@ -115,12 +116,16 @@ fn main() {
 
     let mut rows: Vec<SysRow> = Vec::new();
 
-    // Helper for 4,096 concurrent sketch routing: pre-generate 4,000,000 (group_id, item_key) pairs
-    // uniformly routed across 4,096 sketches (16 MB total working set -> blows L2, stresses L3/DRAM!).
+    // Helper for 4,096 concurrent sketches (11-16 MB working set -> L3/LLC working set)
+    // AND 65,536 concurrent sketches (181-367 MB working set -> genuinely exceeds 60 MiB L3 / DRAM!).
     let n_groups = 4096usize;
+    let n_groups_64k = 65_536usize;
     let n_dram_ops = 4_000_000usize;
     let group_ids: Vec<u16> = (0..n_dram_ops)
         .map(|i| (wyhash64(i as u64, 0xfeed_face) & 4095) as u16)
+        .collect();
+    let group_ids_64k: Vec<u16> = (0..n_dram_ops)
+        .map(|i| (wyhash64(i as u64, 0xbeef_cafe) & 65_535) as u16)
         .collect();
 
     // Helper to pre-populate a prototype sketch to n = 10^6 (steady-state cardinality per group)
@@ -193,6 +198,19 @@ fn main() {
                 black_box(&groups_steady[0]);
             });
             drop(groups_steady);
+
+            //    (a2) Genuine DRAM-exceeding 65,536 concurrent sketches (181-367 MB >> 60 MiB L3):
+            let mut groups_64k: Vec<_> = (0..n_groups_64k).map(|_| proto_1m.clone()).collect();
+            let mut g64_base = prefill_n + 100_000_000;
+            let dram_65536_steady_ns = bench_ns_per_op(3, n_dram_ops, || {
+                for (step, &gid) in group_ids_64k.iter().enumerate() {
+                    let h = wyhash64(g64_base + step as u64, seed);
+                    $add_fn(&mut groups_64k[gid as usize], h);
+                }
+                g64_base += n_dram_ops as u64;
+                black_box(&groups_64k[0]);
+            });
+            drop(groups_64k);
 
             //    (b) Cold/Warm lifecycle: fresh 4,096 empty sketches per repeat streaming 4M brand-new (group, key) pairs
             //        (NO replay of a cached 4M batch after warmup!).
@@ -313,9 +331,9 @@ fn main() {
             let ram_b = $ram_fn(&sk_steady);
             let wire_b = $wire_fn(&sk_steady);
             println!(
-                "  {:18} | RAM={:5}B Wire={:5}B | L1(1e4)={:5.2}ns L1(1e7)={:5.2}ns | 4096-DRAM(1e6)={:6.2}ns (cold={:6.2}ns) | mrg={:6.0}ns (skew={:5.0}ns) | est={:6.2}us ({:.0}it) | ser={:6.0}ns | EE={:5.1}%",
+                "  {:18} | RAM={:5}B Wire={:5}B | L1(1e4)={:5.2}ns L1(1e7)={:5.2}ns | 4K-LLC={:6.2}ns (cold={:6.2}ns) | 64K-DRAM={:6.2}ns | mrg={:6.0}ns (skew={:5.0}ns) | est={:6.2}us ({:.0}it) | ser={:6.0}ns | EE={:5.1}%",
                 $name, ram_b, wire_b, l1_cold_1e4_ns, l1_steady_1e7_ns, dram_4096_steady_ns, dram_4096_cold_ns,
-                merge_equal_pure_ns, merge_skew_pure_ns, est_ml_ns / 1000.0, est_ml_iters, ser_ns, ee_rate_1e7_pct
+                dram_65536_steady_ns, merge_equal_pure_ns, merge_skew_pure_ns, est_ml_ns / 1000.0, est_ml_iters, ser_ns, ee_rate_1e7_pct
             );
             rows.push(SysRow {
                 name: $name.to_string(),
@@ -325,6 +343,7 @@ fn main() {
                 l1_steady_1e7_ns,
                 dram_4096_steady_ns,
                 dram_4096_cold_ns,
+                dram_65536_steady_ns,
                 merge_equal_ns: merge_equal_pure_ns,
                 merge_skew_ns: merge_skew_pure_ns,
                 est_ml_us: est_ml_ns / 1000.0,
@@ -438,7 +457,7 @@ fn main() {
         |s: &mut AvllSketch, h| { s.add_hash_64(h); },
         |s: &mut AvllSketch, h| s.add_hash_64(h),
         |a: &mut AvllSketch, b: &AvllSketch| { *a = a.merge(b); },
-        |s: &AvllSketch| s.estimate_ml(&pmf_avll),
+        |s: &AvllSketch| s.estimate_ml_exact_mod(),
         |s: &AvllSketch, out: &mut Vec<u8>| {
             out.clear();
             out.extend_from_slice(&(s.global_nlz as u64).to_le_bytes());
@@ -485,6 +504,30 @@ fn main() {
         |s: &Hll4Sketch| s.wire_bytes()
     );
 
+    bench_method!(
+        "HBS(p=12)",
+        || HbsSketch::new(12),
+        |s: &mut HbsSketch, h| { s.add_hash_64(h); },
+        |s: &mut HbsSketch, h| s.add_hash_64(h),
+        |a: &mut HbsSketch, b: &HbsSketch| { a.merge_in_place(b); },
+        |s: &HbsSketch| s.estimate_ml(&pmf_ull),
+        |s: &HbsSketch, out: &mut Vec<u8>| { s.serialize_into(out); },
+        |s: &HbsSketch| s.ram_bytes(),
+        |s: &HbsSketch| s.wire_bytes()
+    );
+
+    bench_method!(
+        "HBS(p=13)",
+        || HbsSketch::new(13),
+        |s: &mut HbsSketch, h| { s.add_hash_64(h); },
+        |s: &mut HbsSketch, h| s.add_hash_64(h),
+        |a: &mut HbsSketch, b: &HbsSketch| { a.merge_in_place(b); },
+        |s: &HbsSketch| s.estimate_ml(&pmf_hll13),
+        |s: &HbsSketch, out: &mut Vec<u8>| { s.serialize_into(out); },
+        |s: &HbsSketch| s.ram_bytes(),
+        |s: &HbsSketch| s.wire_bytes()
+    );
+
     // --- A4 Small-Sketch Low-Cardinality Throughput Audit (0.5 KB & 1 KB, n in {100, 1000, 10000}) ---
     println!("\n=== [M3/A4] Small-Sketch Low-Cardinality Throughput (0.5 KB & 1 KB, n <= 10^4) ===");
     let mut small_rows = Vec::new();
@@ -528,15 +571,15 @@ fn main() {
     let mut tsv = File::create(out_dir.join("m3_sys_bench.tsv")).unwrap();
     writeln!(
         tsv,
-        "method\tram_bytes\twire_bytes\tl1_cold_1e4_ns\tl1_steady_1e7_ns\tdram_4096_steady_ns\tdram_4096_cold_ns\tmerge_equal_ns\tmerge_skew_ns\test_ml_us\test_ml_iters\tser_ns\tee_rate_1e7_pct"
+        "method\tram_bytes\twire_bytes\tl1_cold_1e4_ns\tl1_steady_1e7_ns\tdram_4096_steady_ns\tdram_4096_cold_ns\tdram_65536_steady_ns\tmerge_equal_ns\tmerge_skew_ns\test_ml_us\test_ml_iters\tser_ns\tee_rate_1e7_pct"
     ).unwrap();
     for r in &rows {
         writeln!(
             tsv,
-            "{}\t{}\t{}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.1}\t{:.1}\t{:.3}\t{:.1}\t{:.1}\t{:.2}",
+            "{}\t{}\t{}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.1}\t{:.1}\t{:.3}\t{:.1}\t{:.1}\t{:.2}",
             r.name, r.ram_bytes, r.wire_bytes, r.l1_cold_1e4_ns, r.l1_steady_1e7_ns,
-            r.dram_4096_steady_ns, r.dram_4096_cold_ns, r.merge_equal_ns, r.merge_skew_ns,
-            r.est_ml_us, r.est_ml_iters, r.ser_ns, r.ee_rate_1e7_pct
+            r.dram_4096_steady_ns, r.dram_4096_cold_ns, r.dram_65536_steady_ns,
+            r.merge_equal_ns, r.merge_skew_ns, r.est_ml_us, r.est_ml_iters, r.ser_ns, r.ee_rate_1e7_pct
         ).unwrap();
     }
 
@@ -550,7 +593,7 @@ fn main() {
         let merge_ratio = r.merge_equal_ns / ell24.merge_equal_ns;
         let pass_a2 = l1_ratio <= 1.5 && dram_speedup >= 1.0 && merge_ratio <= 2.0;
         println!(
-            "\n  [A2 Gate Check] {:16} vs ELL(2,24): L1_steady={:.2}x (<=1.5), L1_cold={:.2}x, 4096-DRAM_speedup={:.2}x (>=1.0), merge={:.2}x (<=2.0) => {}",
+            "\n  [System Summary] {:16} vs ELL(2,24): L1_steady={:.2}x (<=1.5), L1_cold={:.2}x, 4096-DRAM_speedup={:.2}x (>=1.0), merge={:.2}x (<=2.0) => {}",
             r.name, l1_ratio, l1_cold_ratio, dram_speedup, merge_ratio, if pass_a2 { "PASS" } else { "FAIL" }
         );
         gate_lines.push(format!(
@@ -560,10 +603,10 @@ fn main() {
     }
 
     let rows_json: Vec<String> = rows.iter().map(|r| format!(
-        "    {{\"method\": \"{}\", \"ram_bytes\": {}, \"wire_bytes\": {}, \"l1_cold_1e4_ns\": {:.3}, \"l1_steady_1e7_ns\": {:.3}, \"dram_4096_steady_ns\": {:.3}, \"dram_4096_cold_ns\": {:.3}, \"merge_equal_ns\": {:.1}, \"merge_skew_ns\": {:.1}, \"est_ml_us\": {:.3}, \"est_ml_iters\": {:.1}, \"ser_ns\": {:.1}, \"ee_rate_1e7_pct\": {:.2}}}",
+        "    {{\"method\": \"{}\", \"ram_bytes\": {}, \"wire_bytes\": {}, \"l1_cold_1e4_ns\": {:.3}, \"l1_steady_1e7_ns\": {:.3}, \"dram_4096_steady_ns\": {:.3}, \"dram_4096_cold_ns\": {:.3}, \"dram_65536_steady_ns\": {:.3}, \"merge_equal_ns\": {:.1}, \"merge_skew_ns\": {:.1}, \"est_ml_us\": {:.3}, \"est_ml_iters\": {:.1}, \"ser_ns\": {:.1}, \"ee_rate_1e7_pct\": {:.2}}}",
         r.name, r.ram_bytes, r.wire_bytes, r.l1_cold_1e4_ns, r.l1_steady_1e7_ns,
-        r.dram_4096_steady_ns, r.dram_4096_cold_ns, r.merge_equal_ns, r.merge_skew_ns,
-        r.est_ml_us, r.est_ml_iters, r.ser_ns, r.ee_rate_1e7_pct
+        r.dram_4096_steady_ns, r.dram_4096_cold_ns, r.dram_65536_steady_ns,
+        r.merge_equal_ns, r.merge_skew_ns, r.est_ml_us, r.est_ml_iters, r.ser_ns, r.ee_rate_1e7_pct
     )).collect();
     let small_json: Vec<String> = small_rows.iter().map(|(b, n, e, gh, gd, h2)| format!(
         "    {{\"budget\": \"{}\", \"n\": {}, \"ell24_ns\": {:.3}, \"g128_hybrid_ns\": {:.3}, \"g128_dense_ns\": {:.3}, \"osbmw256_hybrid_ns\": {:.3}, \"g128_hybrid_ratio\": {:.3}, \"osbmw256_hybrid_ratio\": {:.3}}}",

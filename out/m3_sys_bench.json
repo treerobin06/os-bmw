@@ -1,0 +1,39 @@
+{
+  "build_env": {
+    "rustc_version": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+    "target_arch": "x86_64",
+    "avx512_5b_kernel_enabled": true,
+    "compiled_simd_features": ["avx2", "avx512f", "avx512bw", "avx512vbmi", "avx512vbmi2"]
+  },
+  "wyhash64_baseline_ns": 1.979,
+  "rows": [
+    {"method": "OS-BMW-5b(k24)", "ram_bytes": 2760, "wire_bytes": 2760, "l1_cold_1e4_ns": 5.908, "l1_steady_1e7_ns": 2.970, "dram_4096_steady_ns": 7.713, "dram_4096_cold_ns": 19.247, "dram_65536_steady_ns": 24.095, "merge_equal_ns": 948.8, "merge_skew_ns": 383.2, "est_ml_us": 12.965, "est_ml_iters": 7.0, "ser_ns": 29.3, "ee_rate_1e7_pct": 99.64},
+    {"method": "OS-BMW-5b(k20+m)", "ram_bytes": 2760, "wire_bytes": 2760, "l1_cold_1e4_ns": 6.269, "l1_steady_1e7_ns": 2.962, "dram_4096_steady_ns": 7.324, "dram_4096_cold_ns": 18.986, "dram_65536_steady_ns": 23.551, "merge_equal_ns": 1011.8, "merge_skew_ns": 383.9, "est_ml_us": 11.562, "est_ml_iters": 7.0, "ser_ns": 26.5, "ee_rate_1e7_pct": 99.64},
+    {"method": "OS-BMW-5b-256B", "ram_bytes": 4104, "wire_bytes": 4104, "l1_cold_1e4_ns": 7.407, "l1_steady_1e7_ns": 4.295, "dram_4096_steady_ns": 10.473, "dram_4096_cold_ns": 21.367, "dram_65536_steady_ns": 31.209, "merge_equal_ns": 1559.5, "merge_skew_ns": 559.7, "est_ml_us": 16.028, "est_ml_iters": 6.0, "ser_ns": 43.5, "ee_rate_1e7_pct": 99.53},
+    {"method": "OS-BMW-Chunk", "ram_bytes": 2632, "wire_bytes": 2632, "l1_cold_1e4_ns": 93.541, "l1_steady_1e7_ns": 3.741, "dram_4096_steady_ns": 11.112, "dram_4096_cold_ns": 66.826, "dram_65536_steady_ns": 28.471, "merge_equal_ns": 18053.8, "merge_skew_ns": 17566.1, "est_ml_us": 17.004, "est_ml_iters": 7.0, "ser_ns": 34.9, "ee_rate_1e7_pct": 99.71},
+    {"method": "ELL(2,24)", "ram_bytes": 4104, "wire_bytes": 4104, "l1_cold_1e4_ns": 4.298, "l1_steady_1e7_ns": 3.530, "dram_4096_steady_ns": 15.030, "dram_4096_cold_ns": 21.684, "dram_65536_steady_ns": 39.615, "merge_equal_ns": 494.8, "merge_skew_ns": 494.9, "est_ml_us": 70.620, "est_ml_iters": 4.0, "ser_ns": 47.7, "ee_rate_1e7_pct": 0.00},
+    {"method": "ELL(2,20)", "ram_bytes": 3592, "wire_bytes": 3592, "l1_cold_1e4_ns": 6.509, "l1_steady_1e7_ns": 4.692, "dram_4096_steady_ns": 16.079, "dram_4096_cold_ns": 24.850, "dram_65536_steady_ns": 41.789, "merge_equal_ns": 5685.5, "merge_skew_ns": 2180.1, "est_ml_us": 66.799, "est_ml_iters": 6.0, "ser_ns": 28.8, "ee_rate_1e7_pct": 0.00},
+    {"method": "ULL", "ram_bytes": 4104, "wire_bytes": 4104, "l1_cold_1e4_ns": 9.610, "l1_steady_1e7_ns": 3.372, "dram_4096_steady_ns": 13.281, "dram_4096_cold_ns": 17.276, "dram_65536_steady_ns": 37.967, "merge_equal_ns": 590.1, "merge_skew_ns": 580.1, "est_ml_us": 17.682, "est_ml_iters": 6.0, "ser_ns": 50.7, "ee_rate_1e7_pct": 0.00},
+    {"method": "HLL++(6b)", "ram_bytes": 3080, "wire_bytes": 3080, "l1_cold_1e4_ns": 8.363, "l1_steady_1e7_ns": 3.592, "dram_4096_steady_ns": 13.159, "dram_4096_cold_ns": 16.702, "dram_65536_steady_ns": 35.319, "merge_equal_ns": 13679.0, "merge_skew_ns": 4428.2, "est_ml_us": 6.823, "est_ml_iters": 5.0, "ser_ns": 31.2, "ee_rate_1e7_pct": 0.00},
+    {"method": "AVLL(base56)", "ram_bytes": 4096, "wire_bytes": 4096, "l1_cold_1e4_ns": 36.282, "l1_steady_1e7_ns": 2.692, "dram_4096_steady_ns": 14.032, "dram_4096_cold_ns": 52.424, "dram_65536_steady_ns": 30.964, "merge_equal_ns": 77077.0, "merge_skew_ns": 48704.5, "est_ml_us": 221.644, "est_ml_iters": 5.0, "ser_ns": 45.9, "ee_rate_1e7_pct": 96.95},
+    {"method": "CPC(lgK=11)", "ram_bytes": 4120, "wire_bytes": 1367, "l1_cold_1e4_ns": 8.044, "l1_steady_1e7_ns": 2.531, "dram_4096_steady_ns": 5.255, "dram_4096_cold_ns": 17.106, "dram_65536_steady_ns": 13.700, "merge_equal_ns": 3208.4, "merge_skew_ns": 268.9, "est_ml_us": 14.675, "est_ml_iters": 6.0, "ser_ns": 25440.6, "ee_rate_1e7_pct": 0.00},
+    {"method": "HLLL(p=12)", "ram_bytes": 9760, "wire_bytes": 2208, "l1_cold_1e4_ns": 13.828, "l1_steady_1e7_ns": 9.050, "dram_4096_steady_ns": 37.020, "dram_4096_cold_ns": 29.116, "dram_65536_steady_ns": 91.728, "merge_equal_ns": 93452.0, "merge_skew_ns": 71938.2, "est_ml_us": 13.619, "est_ml_iters": 5.0, "ser_ns": 1047.0, "ee_rate_1e7_pct": 0.00},
+    {"method": "HLL_4(dyn)", "ram_bytes": 2152, "wire_bytes": 2072, "l1_cold_1e4_ns": 14.952, "l1_steady_1e7_ns": 3.783, "dram_4096_steady_ns": 6.039, "dram_4096_cold_ns": 24.088, "dram_65536_steady_ns": 15.106, "merge_equal_ns": 21946.5, "merge_skew_ns": 9758.6, "est_ml_us": 10.106, "est_ml_iters": 5.0, "ser_ns": 26.3, "ee_rate_1e7_pct": 0.00},
+    {"method": "HBS(p=12)", "ram_bytes": 3426, "wire_bytes": 1561, "l1_cold_1e4_ns": 157.251, "l1_steady_1e7_ns": 5.389, "dram_4096_steady_ns": 23.399, "dram_4096_cold_ns": 403.266, "dram_65536_steady_ns": 48.445, "merge_equal_ns": 78767.6, "merge_skew_ns": 68679.5, "est_ml_us": 30.390, "est_ml_iters": 5.0, "ser_ns": 2100.6, "ee_rate_1e7_pct": 99.87},
+    {"method": "HBS(p=13)", "ram_bytes": 5602, "wire_bytes": 3081, "l1_cold_1e4_ns": 175.988, "l1_steady_1e7_ns": 5.565, "dram_4096_steady_ns": 30.272, "dram_4096_cold_ns": 434.833, "dram_65536_steady_ns": 68.360, "merge_equal_ns": 147886.1, "merge_skew_ns": 138786.5, "est_ml_us": 59.147, "est_ml_iters": 5.0, "ser_ns": 4128.9, "ee_rate_1e7_pct": 99.69}
+  ],
+  "a2_gate_checks": [
+    {"method": "OS-BMW-5b(k24)", "l1_steady_vs_ell24": 0.8415, "l1_cold_vs_ell24": 1.3746, "dram_4096_speedup_vs_ell24": 1.9486, "merge_vs_ell24": 1.9174, "pass_a2_sys_gate": true},
+    {"method": "OS-BMW-5b(k20+m)", "l1_steady_vs_ell24": 0.8392, "l1_cold_vs_ell24": 1.4585, "dram_4096_speedup_vs_ell24": 2.0522, "merge_vs_ell24": 2.0449, "pass_a2_sys_gate": false},
+    {"method": "OS-BMW-5b-256B", "l1_steady_vs_ell24": 1.2167, "l1_cold_vs_ell24": 1.7232, "dram_4096_speedup_vs_ell24": 1.4351, "merge_vs_ell24": 3.1517, "pass_a2_sys_gate": false},
+    {"method": "OS-BMW-Chunk", "l1_steady_vs_ell24": 1.0598, "l1_cold_vs_ell24": 21.7638, "dram_4096_speedup_vs_ell24": 1.3525, "merge_vs_ell24": 36.4861, "pass_a2_sys_gate": false}
+  ],
+  "a4_small_sketch_low_n": [
+    {"budget": "0.5KB", "n": 100, "ell24_ns": 3.520, "g128_hybrid_ns": 10.980, "g128_dense_ns": 6.090, "osbmw256_hybrid_ns": 15.350, "g128_hybrid_ratio": 3.119, "osbmw256_hybrid_ratio": 4.361},
+    {"budget": "0.5KB", "n": 1000, "ell24_ns": 3.248, "g128_hybrid_ns": 6.753, "g128_dense_ns": 5.854, "osbmw256_hybrid_ns": 8.664, "g128_hybrid_ratio": 2.079, "osbmw256_hybrid_ratio": 2.667},
+    {"budget": "0.5KB", "n": 10000, "ell24_ns": 3.426, "g128_hybrid_ns": 6.828, "g128_dense_ns": 6.197, "osbmw256_hybrid_ns": 9.446, "g128_hybrid_ratio": 1.993, "osbmw256_hybrid_ratio": 2.757},
+    {"budget": "1KB", "n": 100, "ell24_ns": 3.440, "g128_hybrid_ns": 15.040, "g128_dense_ns": 6.170, "osbmw256_hybrid_ns": 8.905, "g128_hybrid_ratio": 4.372, "osbmw256_hybrid_ratio": 2.589},
+    {"budget": "1KB", "n": 1000, "ell24_ns": 3.189, "g128_hybrid_ns": 7.215, "g128_dense_ns": 5.836, "osbmw256_hybrid_ns": 10.274, "g128_hybrid_ratio": 2.262, "osbmw256_hybrid_ratio": 3.222},
+    {"budget": "1KB", "n": 10000, "ell24_ns": 3.200, "g128_hybrid_ns": 6.785, "g128_dense_ns": 6.083, "osbmw256_hybrid_ns": 9.122, "g128_hybrid_ratio": 2.120, "osbmw256_hybrid_ratio": 2.850}
+  ]
+}

@@ -1,0 +1,6 @@
+method	ram_bytes	bit_exact_div3	l1_cold_1e4_ns	l1_steady_1e7_ns	dram_4096_steady_ns	dram_4096_cold_ns	merge_equal_ns	merge_skew_ns	est_ml_us	ee_rate_1e7_pct	acc_1e4_bias_pct	acc_1e4_rmse_pct	acc_1e4_mvp	acc_1e6_bias_pct	acc_1e6_rmse_pct	acc_1e6_mvp
+OS-BMW-5b(k24)_Pow2	2760	N/A_Pow2	5.899	2.965	7.898	18.708	888.2	863.9	11.426	99.64	0.0665	0.9064	1.8140	0.0520	1.1437	2.8881
+OS-BMW-5b-256B_Div3_Orig	4104	exact_ref	7.545	4.280	9.934	21.656	1386.1	1361.3	16.309	99.53	0.0679	0.6605	1.4324	-0.1111	0.9476	2.9478
+OS-BMW-5b-256B_MulShift128_Exact	4104	bit_identical	7.678	3.478	9.359	21.204	1382.6	1359.8	17.531	99.53	0.0679	0.6605	1.4324	-0.1111	0.9476	2.9478
+OS-BMW-5b-256B_MulShift384_ZeroCP	4104	pow2_w35_zero_cp	6.814	2.725	10.783	20.968	1382.5	1367.2	15.897	99.55	0.0208	0.6707	1.4770	-0.0615	0.8578	2.4157
+ELL(2,24)	4104	N/A_ErtlT2	4.051	3.536	14.100	19.791	494.9	493.6	74.920	0.00	0.0899	0.8191	2.2029	-0.0335	1.0781	3.8161

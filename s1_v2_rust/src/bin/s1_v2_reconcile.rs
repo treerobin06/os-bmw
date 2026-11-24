@@ -250,7 +250,7 @@ fn main() {
     let pmf_hy_g128 = PreimagePmf::build(DistSpec::Pow2 { w_bits: 64 - 2 - 7, max_cap: 63 });
     let pmf_hy_256 = PreimagePmf::build(DistSpec::Pow2Div3 { p_tot: 7 + 1 });
 
-    // Codex R1 counterexample: keys 27 & 73, seed 0 on both g=128 (4 blks) and 256B (2 blks)
+    // Sparse idempotence regression: keys 27 & 73, seed 0 on both g=128 (4 blks) and 256B (2 blks)
     let mut c128_dir = OsBmwHybrid::<128, 8>::new(4, HashMode5b::Pow2);
     c128_dir.add_hash_64(wyhash64(27, 0));
     c128_dir.add_hash_64(wyhash64(73, 0));
@@ -262,8 +262,8 @@ fn main() {
     c128_mrg.merge_in_place(&c128_b).unwrap();
     let mut c128_idem = c128_dir.clone();
     c128_idem.merge_in_place(&c128_dir).unwrap();
-    let codex_g128_direct_est = c128_dir.estimate_ml(&pmf_hy_g128).0;
-    let codex_g128_merged_est = c128_mrg.estimate_ml(&pmf_hy_g128).0;
+    let reg_g128_direct_est = c128_dir.estimate_ml(&pmf_hy_g128).0;
+    let reg_g128_merged_est = c128_mrg.estimate_ml(&pmf_hy_g128).0;
 
     let mut c256_dir = OsBmwHybrid::<384, 16>::new(2, HashMode5b::Div3);
     c256_dir.add_hash_64(wyhash64(27, 0));
@@ -276,21 +276,21 @@ fn main() {
     c256_mrg.merge_in_place(&c256_b).unwrap();
     let mut c256_idem = c256_dir.clone();
     c256_idem.merge_in_place(&c256_dir).unwrap();
-    let codex_256b_direct_est = c256_dir.estimate_ml(&pmf_hy_256).0;
-    let codex_256b_merged_est = c256_mrg.estimate_ml(&pmf_hy_256).0;
+    let reg_256b_direct_est = c256_dir.estimate_ml(&pmf_hy_256).0;
+    let reg_256b_merged_est = c256_mrg.estimate_ml(&pmf_hy_256).0;
 
-    let codex_keys_27_73_ok = c128_dir.is_sparse()
+    let reg_keys_27_73_ok = c128_dir.is_sparse()
         && c128_mrg.is_sparse()
         && c128_dir == c128_mrg
         && c128_idem == c128_dir
-        && (codex_g128_direct_est - codex_g128_merged_est).abs() <= 1e-12
-        && (codex_g128_merged_est - 2.0).abs() < 1e-3
+        && (reg_g128_direct_est - reg_g128_merged_est).abs() <= 1e-12
+        && (reg_g128_merged_est - 2.0).abs() < 1e-3
         && c256_dir.is_sparse()
         && c256_mrg.is_sparse()
         && c256_dir == c256_mrg
         && c256_idem == c256_dir
-        && (codex_256b_direct_est - codex_256b_merged_est).abs() <= 1e-12
-        && (codex_256b_merged_est - 2.0).abs() < 1e-3;
+        && (reg_256b_direct_est - reg_256b_merged_est).abs() <= 1e-12
+        && (reg_256b_merged_est - 2.0).abs() < 1e-3;
 
     // Randomized sparse v sparse -> sparse trials (g=128 cap=48 and 256B cap=96)
     let mut hy_ss_trials = 0usize;
@@ -398,14 +398,14 @@ fn main() {
         hy_cm_trials += 1;
     }
     println!(
-        "  Hybrid Codex (27,73) ok={} (g128: {:.9} vs {:.9}; 256B: {:.9} vs {:.9})",
-        codex_keys_27_73_ok, codex_g128_direct_est, codex_g128_merged_est, codex_256b_direct_est, codex_256b_merged_est
+        "  Hybrid regression (27,73) ok={} (g128: {:.9} vs {:.9}; 256B: {:.9} vs {:.9})",
+        reg_keys_27_73_ok, reg_g128_direct_est, reg_g128_merged_est, reg_256b_direct_est, reg_256b_merged_est
     );
     println!(
         "  Hybrid sparse_v_sparse: {}/{} viol | cross_mode (no to_dense): {}/{} viol (state={}, est={})",
         hy_ss_viol, hy_ss_trials, hy_cm_viol, hy_cm_trials, hy_cm_state_viol, hy_cm_est_viol
     );
-    assert!(codex_keys_27_73_ok);
+    assert!(reg_keys_27_73_ok);
     assert_eq!(hy_ss_viol, 0);
 
     // 3. Deterministic counterexamples audit
@@ -447,8 +447,8 @@ fn main() {
     let pmf_g128 = PreimagePmf::build(DistSpec::Pow2 { w_bits: 64 - 5 - 7, max_cap: 63 }); // 32 blocks x 128
     let pmf_chunk = PreimagePmf::build(DistSpec::GeomNegLog2 { b: 2.05, w_bits: 64 - 2 - 10, max_cap: 63 }); // 4 blocks x 1024
     let pmf_ell = PreimagePmf::build(DistSpec::ErtlT { t: 2, w_bits: 64 - 10 }); // 1024 regs
-    let pmf_avll = PreimagePmf::build(DistSpec::Pow2 { w_bits: 64, max_cap: 63 });
     let pmf_hll4 = PreimagePmf::build(DistSpec::Pow2 { w_bits: 64 - 11, max_cap: 63 });
+    let pmf_hbs = PreimagePmf::build(DistSpec::Pow2 { w_bits: 64 - 12, max_cap: 63 });
 
     let mut drift_tsv = File::create(out_dir.join("m1_multishard_drift.tsv")).unwrap();
     writeln!(
@@ -467,6 +467,7 @@ fn main() {
             "ELL(2,24)",
             "AVLL",
             "HLL_4-Fixed(cap=32)",
+            "HBS(p=12)",
         ];
         let mut stats = vec![(0usize, 0usize, 0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64); names.len()];
 
@@ -479,6 +480,7 @@ fn main() {
             let mut dir_ell = Ell24Sketch::new(10);
             let mut dir_avll = AvllSketch::new_words(128); // 1,408 buckets (~1 KB, matching AVLL §6!)
             let mut dir_h4f = Hll4Sketch::new_fixed(11, 32);
+            let mut dir_hbs = HbsSketch::new(12);
 
             let mut sh_5b: Vec<_> = (0..shards).map(|_| OsBmw5b::new(8, HashMode5b::Pow2)).collect();
             let mut sh_256: Vec<_> = (0..shards).map(|_| OsBmw256::new(16, HashMode5b::Div3)).collect();
@@ -487,6 +489,7 @@ fn main() {
             let mut sh_ell: Vec<_> = (0..shards).map(|_| Ell24Sketch::new(10)).collect();
             let mut sh_avll: Vec<_> = (0..shards).map(|_| AvllSketch::new_words(128)).collect();
             let mut sh_h4f: Vec<_> = (0..shards).map(|_| Hll4Sketch::new_fixed(11, 32)).collect();
+            let mut sh_hbs: Vec<_> = (0..shards).map(|_| HbsSketch::new(12)).collect();
 
             // Realistic partition: shard 0 receives first N/S items, etc. (disjoint time/range shards!)
             // For S=512, each shard has ~3,906 items; outliers hit low-floor shards before merge!
@@ -500,6 +503,7 @@ fn main() {
                 dir_ell.add_hash_64(h);             sh_ell[s_idx].add_hash_64(h);
                 dir_avll.add_hash_64(h);            sh_avll[s_idx].add_hash_64(h);
                 dir_h4f.add_hash_64(h);             sh_h4f[s_idx].add_hash_64(h);
+                dir_hbs.add_hash_64(h);             sh_hbs[s_idx].add_hash_64(h);
             }
 
             // Balanced binary tree merge vs Left-deep chain merge!
@@ -548,6 +552,11 @@ fn main() {
             let t_h4f = tree_merge(sh_h4f.clone(), |a, b| { let mut c = a.clone(); c.merge_in_place(b); c });
             let c_h4f = chain_merge(&sh_h4f, |a, b| { let mut c = a.clone(); c.merge_in_place(b); c });
 
+            let t_hbs = tree_merge(sh_hbs.clone(), |a, b| { let mut c = a.clone(); c.merge_in_place(b); c });
+            let c_hbs = chain_merge(&sh_hbs, |a, b| { let mut c = a.clone(); c.merge_in_place(b); c });
+            let hbs_part_mis = (0..dir_hbs.m).any(|r| t_hbs.get_reg(r) != dir_hbs.get_reg(r));
+            let hbs_assoc_mis = (0..dir_hbs.m).any(|r| t_hbs.get_reg(r) != c_hbs.get_reg(r));
+
             let nf = n_total as f64;
             let update_stat = |idx: usize, pm: bool, am: bool, ed: f64, em: f64, st: &mut [(usize, usize, f64, f64, f64, f64)]| {
                 if pm { st[idx].0 += 1; }
@@ -564,8 +573,9 @@ fn main() {
             update_stat(2, t_g128 != dir_g128, t_g128 != c_g128, dir_g128.estimate_ml(&pmf_g128).0, t_g128.estimate_ml(&pmf_g128).0, &mut stats);
             update_stat(3, t_chunk != dir_chunk, t_chunk != c_chunk, dir_chunk.estimate_ml(&pmf_chunk).0, t_chunk.estimate_ml(&pmf_chunk).0, &mut stats);
             update_stat(4, t_ell != dir_ell, t_ell != c_ell, dir_ell.estimate_ml(&pmf_ell).0, t_ell.estimate_ml(&pmf_ell).0, &mut stats);
-            update_stat(5, t_avll != dir_avll, t_avll != c_avll, dir_avll.estimate_ml(&pmf_avll).0, t_avll.estimate_ml(&pmf_avll).0, &mut stats);
+            update_stat(5, t_avll != dir_avll, t_avll != c_avll, dir_avll.estimate_ml_exact_mod().0, t_avll.estimate_ml_exact_mod().0, &mut stats);
             update_stat(6, t_h4f != dir_h4f, t_h4f != c_h4f, dir_h4f.estimate_ml(&pmf_hll4).0, t_h4f.estimate_ml(&pmf_hll4).0, &mut stats);
+            update_stat(7, hbs_part_mis, hbs_assoc_mis, dir_hbs.estimate_ml(&pmf_hbs).0, t_hbs.estimate_ml(&pmf_hbs).0, &mut stats);
         }
 
         for (idx, name) in names.iter().enumerate() {
@@ -627,11 +637,11 @@ r#"{{
   }},
   "hybrid_sparse_audit": {{
     "note": "Engineering sparse wrapper evaluated directly on full mode+content+estimate (NO to_dense() masking); excluded from Theorem 1 pure-Dense family claim.",
-    "codex_keys_27_73_ok": {},
-    "codex_g128_direct_est": {:.9},
-    "codex_g128_merged_est": {:.9},
-    "codex_256b_direct_est": {:.9},
-    "codex_256b_merged_est": {:.9},
+    "regression_keys_27_73_ok": {},
+    "regression_g128_direct_est": {:.9},
+    "regression_g128_merged_est": {:.9},
+    "regression_256b_direct_est": {:.9},
+    "regression_256b_merged_est": {:.9},
     "sparse_sparse_trials": {},
     "sparse_sparse_violations": {},
     "cross_mode_trials": {},
@@ -656,9 +666,9 @@ r#"{{
         avll_part_stream, avll_part_merge,
         avll_assoc_lhs, avll_assoc_rhs,
         hll4f_direct, hll4f_merge,
-        codex_keys_27_73_ok,
-        codex_g128_direct_est, codex_g128_merged_est,
-        codex_256b_direct_est, codex_256b_merged_est,
+        reg_keys_27_73_ok,
+        reg_g128_direct_est, reg_g128_merged_est,
+        reg_256b_direct_est, reg_256b_merged_est,
         hy_ss_trials, hy_ss_viol,
         hy_cm_trials, hy_cm_viol, hy_cm_state_viol, hy_cm_est_viol,
         drift_json_rows.join(",\n")

@@ -294,7 +294,7 @@ fn main() {
     run_variant!(
         "OS-BMW-5b-256B_MulShift384_ZeroCP",
         "pow2_w35_zero_cp",
-        || OsBmw256::new(16, HashMode5b::Div3),
+        || OsBmw256::new(16, HashMode5b::MulShift384),
         |s: &mut OsBmw256, h: u64| { s.add_hash_64_mulshift384(h); },
         |s: &mut OsBmw256, h: u64| s.add_hash_64_mulshift384(h),
         |a: &mut OsBmw256, b: &OsBmw256| { a.merge_in_place(b).unwrap(); },

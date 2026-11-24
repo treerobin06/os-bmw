@@ -2,6 +2,7 @@
 name = "s1_v2_rust"
 version = "0.2.0"
 edition = "2021"
+rust-version = "1.94"
 description = "S1 OS-BMW-v2-Solid: In-place zero-copy u64 semilattice cardinality sketch, baselines, exact 64-bit preimage PMF, and Wire codec"
 
 [lib]
@@ -31,6 +32,22 @@ path = "src/bin/s1_v2_256b_mulshift.rs"
 [[bin]]
 name = "s1_v2_equal_error_hip"
 path = "src/bin/s1_v2_equal_error_hip.rs"
+
+[[bin]]
+name = "s1_v2_simd_parity"
+path = "src/bin/s1_v2_simd_parity.rs"
+
+[[bin]]
+name = "s1_v2_ablation_4k"
+path = "src/bin/s1_v2_ablation_4k.rs"
+
+[[bin]]
+name = "s1_v2_bench_supp"
+path = "src/bin/s1_v2_bench_supp.rs"
+
+[[bin]]
+name = "s1_v2_real_streams_ci"
+path = "src/bin/s1_v2_real_streams_ci.rs"
 
 [profile.release]
 opt-level = 3

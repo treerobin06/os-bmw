@@ -1,0 +1,9 @@
+{
+  "workload": "W7_8T_128g_768M_Dense_part0",
+  "profiles": [
+    {"method":"OS-BMW-5b(k24)","total_ops":96000000,"ee_hits":37965718,"normal_lut":55975575,"existing_ov":2031864,"ov_insert":25968,"reanchor":875,"ee_pct":39.5476,"lut_pct":58.3079,"existing_ov_pct":2.1165,"ov_insert_pct":0.027050,"reanchor_pct":0.000911,"anchor_min":8,"anchor_mean":8.854,"anchor_max":10},
+    {"method":"OS-BMW-5b(k24,16blk)","total_ops":96000000,"ee_hits":427679,"normal_lut":92613084,"existing_ov":2929380,"ov_insert":29837,"reanchor":20,"ee_pct":0.4455,"lut_pct":96.4720,"existing_ov_pct":3.0514,"ov_insert_pct":0.031080,"reanchor_pct":0.000021,"anchor_min":8,"anchor_mean":8.010,"anchor_max":9},
+    {"method":"OS-BMW-5b-256B(Div3)","total_ops":96000000,"ee_hits":23655228,"normal_lut":70038937,"existing_ov":2267589,"ov_insert":36194,"reanchor":2052,"ee_pct":24.6409,"lut_pct":72.9572,"existing_ov_pct":2.3621,"ov_insert_pct":0.037702,"reanchor_pct":0.002138,"anchor_min":8,"anchor_mean":9.002,"anchor_max":11},
+    {"method":"OS-BMW-5b-256B(MS384)","total_ops":96000000,"ee_hits":17147742,"normal_lut":76305795,"existing_ov":2517570,"ov_insert":28102,"reanchor":791,"ee_pct":17.8622,"lut_pct":79.4852,"existing_ov_pct":2.6225,"ov_insert_pct":0.029273,"reanchor_pct":0.000824,"anchor_min":8,"anchor_mean":8.386,"anchor_max":10}
+  ]
+}

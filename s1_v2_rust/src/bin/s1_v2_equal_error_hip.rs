@@ -431,9 +431,8 @@ fn main() {
         run_eq_row!("1.0pct", 1.0, "HLL++(6b,p=13)", "yes", Hll6Sketch::new(13).total_bytes(),
             || Hll6Sketch::new(13), |s: &mut Hll6Sketch, h| s.add_hash_64(h), |a: &mut Hll6Sketch, b: &Hll6Sketch| a.merge_in_place(b), |s: &Hll6Sketch| s.estimate_ml(&pmf_hll_13).0);
 
-        let pmf_avll = Arc::new(PreimagePmf::build(DistSpec::Pow2 { w_bits: 64, max_cap: 63 }));
         run_eq_row!("1.0pct", 1.0, "AVLL(base56,512w)", "non_assoc", HEADER_BYTES + 512 * 8,
-            || AvllSketch::new_words(512), |s: &mut AvllSketch, h| { s.add_hash_64(h); }, |a: &mut AvllSketch, b: &AvllSketch| { *a = a.merge(b); }, |s: &AvllSketch| s.estimate_ml(&pmf_avll).0);
+            || AvllSketch::new_words(512), |s: &mut AvllSketch, h| { s.add_hash_64(h); }, |a: &mut AvllSketch, b: &AvllSketch| { *a = a.merge(b); }, |s: &AvllSketch| s.estimate_ml_exact_mod().0);
     }
 
     // Tier 3: ~0.60% RMSE (matches DataFusion built-in 16KB HLL!)
