@@ -122,9 +122,9 @@
     ]
   },
   "rust_verification_tests": {
-    "s1_v2_rust_lib": 29,
+    "s1_v2_rust_lib": 31,
     "s1_v2_equal_error_hip": 1,
     "s1_v2_datafusion": 4,
-    "total": 34
+    "total": 36
   }
 }

@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn test_m1_exhaustive_512x512() {
-        // Exhaustive 512 x 512 = 262,144 pair semilattice & homomorphism check on (g=4, k=2, R=3, d=1)
+        // Exhaustive 512 x 512 = 262,144 pair idempotence/commutativity + 64^3 = 262,144 triple associativity check on (g=4, k=2, R=3, d=1)
         let mut states = Vec::with_capacity(512);
         for s in 0u32..512 {
             let mut blk = OsBmwBlock::new(4, 2, 3, 1);
@@ -463,6 +463,15 @@ mod tests {
                 let ab = OsBmwBlock::merge(&states[i], &states[j]);
                 let ba = OsBmwBlock::merge(&states[j], &states[i]);
                 assert_eq!(ab, ba);
+            }
+        }
+        for i in (0..states.len()).step_by(8) {
+            for j in (0..states.len()).step_by(8) {
+                let ab = OsBmwBlock::merge(&states[i], &states[j]);
+                for k in (0..states.len()).step_by(8) {
+                    let bc = OsBmwBlock::merge(&states[j], &states[k]);
+                    assert_eq!(OsBmwBlock::merge(&ab, &states[k]), OsBmwBlock::merge(&states[i], &bc));
+                }
             }
         }
     }
@@ -1778,5 +1787,60 @@ mod tests {
         sat_probe.buf[9] = (53 << 2) | 3;
         let est_hi = sat_probe.estimate_fgra();
         assert!(est_hi.is_finite() && est_hi > 1e6, "large-range FGRA est={}", est_hi);
+    }
+
+    #[test]
+    fn test_from_bytes_rejects_corrupt_anchor_and_overflow_sentinels() {
+        let base = OsBmw5b::new(4, HashMode5b::Pow2);
+        for bad_anchor in [0u8, 7u8, 64u8] {
+            let mut raw = base.as_wire_bytes().to_vec();
+            raw[HEADER_BYTES] = bad_anchor;
+            assert!(OsBmw5b::from_bytes(&raw, HashMode5b::Pow2).is_err(), "expected Err for anchor={}", bad_anchor);
+            let mut raw_slice = raw.clone();
+            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                OsBmw5b::add_hash_64_flat_slice(&mut raw_slice, 4, HashMode5b::Pow2, 0);
+            })).is_err());
+            let mut dst = base.as_wire_bytes().to_vec();
+            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                OsBmw5b::merge_flat_slices(&mut dst, &raw, 4);
+            })).is_err());
+        }
+        // Set 24 sentinel-31 slots in block 0 (> OV_CAP = 23 for k=24)
+        let mut raw_ov = base.as_wire_bytes().to_vec();
+        let slots0 = HEADER_BYTES + 4;
+        for byte_idx in slots0..slots0 + 15 {
+            raw_ov[byte_idx] = 0xFF;
+        }
+        assert!(OsBmw5b::from_bytes(&raw_ov, HashMode5b::Pow2).is_err());
+
+        // Verify OsBmwChunkInPlace::from_bytes also rejects corrupt anchors
+        let cbase = OsBmwChunkInPlace::new(2);
+        for bad_anchor in [0u8, 7u8, 64u8] {
+            let mut craw = cbase.as_wire_bytes().to_vec();
+            craw[HEADER_BYTES] = bad_anchor;
+            assert!(OsBmwChunkInPlace::from_bytes(&craw, false).is_err());
+        }
+    }
+
+    #[test]
+    fn test_chunk_b205_non_halving_witness_64bit() {
+        // Under shared 64-bit hashing, b=2.05 chunk thresholds shift with p_blk so 4-block states
+        // can collide while 2-block direct states differ, necessitating disjoint 128-bit level bits.
+        let hashes = [0x0712_2232_5db2_a800u64, 0x0712_2232_5db2_b800u64];
+        let mut states_4 = Vec::with_capacity(2);
+        let mut states_2 = Vec::with_capacity(2);
+        for &h in &hashes {
+            let mut s4 = OsBmwChunkInPlace::new(4);
+            let pmf4 = PreimagePmf::build(s4.dist_spec_64());
+            s4.add_hash_64(h, &pmf4);
+            states_4.push(s4.as_wire_bytes().to_vec());
+
+            let mut s2 = OsBmwChunkInPlace::new(2);
+            let pmf2 = PreimagePmf::build(s2.dist_spec_64());
+            s2.add_hash_64(h, &pmf2);
+            states_2.push(s2.as_wire_bytes().to_vec());
+        }
+        assert_eq!(states_4[0], states_4[1], "expected identical 4-block states for witness hashes");
+        assert_ne!(states_2[0], states_2[1], "expected distinct 2-block states breaking 64-bit halving");
     }
 }

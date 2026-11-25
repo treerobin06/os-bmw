@@ -508,16 +508,20 @@ mod avx512_5b {
             } else {
                 unpack_64_slots::<false>(slots1.add(vi * 40), lut1, perm_u, shift_u, perm_comb, mask31, sent31)
             };
+            let c1 = m1.count_ones() as usize;
+            assert!(ov_i1 + c1 < K, "AVX-512 dst overflow sentinel count {} >= {}", ov_i1 + c1, K);
             va = _mm512_mask_expandloadu_epi8(va, m1, ovs1.as_ptr().add(ov_i1) as *const i8);
-            ov_i1 += m1.count_ones() as usize;
+            ov_i1 += c1;
 
             let (mut vb, m2) = if K >= 13 {
                 unpack_64_slots::<true>(slots2.add(vi * 40), lut2, perm_u, shift_u, perm_comb, mask31, sent31)
             } else {
                 unpack_64_slots::<false>(slots2.add(vi * 40), lut2, perm_u, shift_u, perm_comb, mask31, sent31)
             };
+            let c2 = m2.count_ones() as usize;
+            assert!(ov_i2 + c2 < K, "AVX-512 src overflow sentinel count {} >= {}", ov_i2 + c2, K);
             vb = _mm512_mask_expandloadu_epi8(vb, m2, ovs2.as_ptr().add(ov_i2) as *const i8);
-            ov_i2 += m2.count_ones() as usize;
+            ov_i2 += c2;
 
             let mv = if skip_nz {
                 merge_64_ull::<true>(va, vb, delta_lut)
@@ -748,6 +752,9 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
         if K < 2 || Self::OV_CAP == 0 {
             return Err("packed OsBmw5bInPlace requires K >= 2 (OV_CAP >= 1)".to_string());
         }
+        if (G * 5) % 8 != 0 || G % 64 != 0 {
+            return Err("OsBmw5bInPlace requires G to be a multiple of 64".to_string());
+        }
         if bytes.len() < HEADER_BYTES {
             return Err("buffer shorter than 8B header".to_string());
         }
@@ -780,6 +787,24 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
         let expected = HEADER_BYTES + n_blk * Self::BLOCK_BYTES;
         if bytes.len() != expected {
             return Err(format!("byte len {} != expected {}", bytes.len(), expected));
+        }
+        for blk in 0..n_blk {
+            let anchor = bytes[HEADER_BYTES + blk];
+            if !(ANCHOR_INIT..=63).contains(&anchor) {
+                return Err(format!("invalid anchor {} at block {}", anchor, blk));
+            }
+            let slot_ptr = unsafe { bytes.as_ptr().add(Self::slots_base_nblk(n_blk, blk)) };
+            let mut sentinels = 0usize;
+            let full_groups = G >> 4;
+            for g_idx in 0..full_groups {
+                sentinels += unsafe { swar_count_31_group16(slot_ptr.add(g_idx * 10)) };
+            }
+            if sentinels > Self::OV_CAP {
+                return Err(format!("block {} sentinel count {} exceeds overflow capacity {}", blk, sentinels, Self::OV_CAP));
+            }
+            if anchor == 63 && sentinels > 0 {
+                return Err(format!("block {} anchor 63 cannot carry {} overflow sentinels", blk, sentinels));
+            }
         }
         Ok(Self { buf: bytes.to_vec(), n_blk, blk_mask: n_blk - 1, p_blk, sentinel: Self::calc_sentinel(p_blk, mode), mode })
     }
@@ -1653,8 +1678,13 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
             HashMode5b::Pow2 => {
                 let sub = (h as usize) & (G - 1);
                 let blk = ((h >> G.trailing_zeros()) as usize) & blk_mask;
+                let anchor = unsafe { *buf.get_unchecked(HEADER_BYTES + blk) };
+                assert!((ANCHOR_INIT..=63).contains(&anchor), "add_hash_64_flat_slice: invalid anchor={} at blk={}", anchor, blk);
                 let sentinel = 1u64 << (p_blk + G.trailing_zeros() - 1);
                 let lvl = ((h | sentinel).leading_zeros() + 1) as u8;
+                if lvl.wrapping_add(8) <= anchor {
+                    return true;
+                }
                 unsafe { Self::add_level_flat_slice_unchecked(buf, n_blk, blk, sub, lvl) }
             }
             HashMode5b::Div3 => {
@@ -1664,6 +1694,7 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
                 let sentinel = 1u64 << (7 + p_blk - 1);
                 let lvl = (q | sentinel).leading_zeros() as u8;
                 let anchor = unsafe { *buf.get_unchecked(HEADER_BYTES + blk) };
+                assert!((ANCHOR_INIT..=63).contains(&anchor), "add_hash_64_flat_slice: invalid anchor={} at blk={}", anchor, blk);
                 if lvl.wrapping_add(8) <= anchor {
                     return true;
                 }
@@ -1676,6 +1707,7 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
                 let sentinel = 1u64 << (25 + p_blk - 1);
                 let lvl = ((h | sentinel).leading_zeros() + 1) as u8;
                 let anchor = unsafe { *buf.get_unchecked(HEADER_BYTES + blk) };
+                assert!((ANCHOR_INIT..=63).contains(&anchor), "add_hash_64_flat_slice: invalid anchor={} at blk={}", anchor, blk);
                 if lvl.wrapping_add(8) <= anchor {
                     return true;
                 }
@@ -1938,6 +1970,8 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
         for blk in 0..n_blk {
             let a1 = dst[HEADER_BYTES + blk];
             let a2 = src[HEADER_BYTES + blk];
+            assert!((ANCHOR_INIT..=63).contains(&a1), "merge_flat_slices: invalid dst anchor={} at blk={}", a1, blk);
+            assert!((ANCHOR_INIT..=63).contains(&a2), "merge_flat_slices: invalid src anchor={} at blk={}", a2, blk);
             if a1 >= a2.saturating_add(8) {
                 let o_meta = Self::meta_rest_base_nblk(n_blk, blk);
                 if src[o_meta] == 0 {
@@ -1955,6 +1989,7 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
                     let n_ov = unsafe {
                         avx512_5b::collect_ov_positions_avx512::<G, K>(src.as_ptr().add(o_slots), &mut pos_buf)
                     };
+                    assert!(n_ov <= Self::OV_CAP, "merge_flat_slices: src overflow sentinel count {} > {}", n_ov, Self::OV_CAP);
                     for i in 0..n_ov {
                         let r = pos_buf[i] as usize;
                         let b = src[o_meta + i];
@@ -1974,6 +2009,7 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
                     for r in 0..G {
                         let c = unsafe { read_slot_5b(src.as_ptr().add(o_slots), r) };
                         if c == SENTINEL_5B {
+                            assert!(ov_idx < Self::OV_CAP, "merge_flat_slices: src overflow sentinel count exceeded {}", Self::OV_CAP);
                             let b = src[o_meta + ov_idx];
                             ov_idx += 1;
                             let ou = b >> 2;
@@ -2039,6 +2075,8 @@ impl<const G: usize, const K: usize, const HAS_MASK: bool> OsBmw5bInPlace<G, K, 
         for blk in 0..n_blk {
             let a1 = dst[HEADER_BYTES + blk];
             let a2 = src[HEADER_BYTES + blk];
+            assert!((ANCHOR_INIT..=63).contains(&a1), "merge_flat_slices_scalar: invalid dst anchor={} at blk={}", a1, blk);
+            assert!((ANCHOR_INIT..=63).contains(&a2), "merge_flat_slices_scalar: invalid src anchor={} at blk={}", a2, blk);
             let mut u_a = [0u8; G];
             let mut u_b = [0u8; G];
             Self::unpack_block_u8_slice_scalar(dst, n_blk, blk, &mut u_a);
@@ -2160,6 +2198,30 @@ impl OsBmwChunkInPlace {
         let expected = HEADER_BYTES + n_blk * CHUNK_BLOCK_BYTES;
         if bytes.len() != expected {
             return Err(format!("byte len {} != expected {}", bytes.len(), expected));
+        }
+        for blk in 0..n_blk {
+            let anchor = bytes[HEADER_BYTES + blk];
+            if !(ANCHOR_INIT..=63).contains(&anchor) {
+                return Err(format!("invalid chunk anchor {} at block {}", anchor, blk));
+            }
+            let slot_base = HEADER_BYTES + n_blk + blk * CHUNK_SLOT_BYTES;
+            let slot_ptr = unsafe { bytes.as_ptr().add(slot_base) };
+            let mut sentinels = 0usize;
+            for c_idx in 0..128 {
+                let mut v = unsafe { Self::read_chunk39(slot_ptr, c_idx) };
+                for _ in 0..8 {
+                    if (v % 29) as u8 == N_IN_R8D2 {
+                        sentinels += 1;
+                    }
+                    v /= 29;
+                }
+            }
+            if sentinels > CHUNK_OV_CAP {
+                return Err(format!("chunk block {} sentinel count {} exceeds overflow capacity {}", blk, sentinels, CHUNK_OV_CAP));
+            }
+            if anchor == 63 && sentinels > 0 {
+                return Err(format!("chunk block {} anchor 63 cannot carry {} overflow sentinels", blk, sentinels));
+            }
         }
         Ok(Self { buf: bytes.to_vec(), n_blk, p_blk, is_128 })
     }

@@ -11,11 +11,16 @@
         "abs_z_lt_1_96_count": 13,
         "ci95_overlap_count": 20,
         "mean_mvp_a": 2.51933,
-        "mean_mvp_a_se": 0.01736,
+        "mean_mvp_a_se": 0.03968,
         "mean_mvp_b": 3.28754,
-        "mean_mvp_b_se": 0.02194,
+        "mean_mvp_b_se": 0.05021,
         "pooled_diff_b_minus_a": 0.76822,
-        "pooled_z_score": 27.453
+        "pooled_se_conservative": 0.064,
+        "pooled_z_conservative": 12.003,
+        "pooled_se_indep": 0.02798,
+        "pooled_z_indep": 27.453,
+        "pooled_z_score": 12.003,
+        "cross_budget_seed_shared": true
       },
       "dense_1e6_to_1e9": {
         "count": 24,
@@ -24,11 +29,16 @@
         "abs_z_lt_1_96_count": 6,
         "ci95_overlap_count": 8,
         "mean_mvp_a": 3.14566,
-        "mean_mvp_a_se": 0.0354,
+        "mean_mvp_a_se": 0.0809,
         "mean_mvp_b": 3.84927,
-        "mean_mvp_b_se": 0.04238,
+        "mean_mvp_b_se": 0.09727,
         "pooled_diff_b_minus_a": 0.70361,
-        "pooled_z_score": 12.742
+        "pooled_se_conservative": 0.12651,
+        "pooled_z_conservative": 5.562,
+        "pooled_se_indep": 0.05522,
+        "pooled_z_indep": 12.742,
+        "pooled_z_score": 5.562,
+        "cross_budget_seed_shared": true
       },
       "dense_all_ge_1e6": {
         "count": 48,
@@ -37,11 +47,16 @@
         "abs_z_lt_1_96_count": 13,
         "ci95_overlap_count": 20,
         "mean_mvp_a": 3.11218,
-        "mean_mvp_a_se": 0.02474,
+        "mean_mvp_a_se": 0.05651,
         "mean_mvp_b": 3.78719,
-        "mean_mvp_b_se": 0.02977,
+        "mean_mvp_b_se": 0.06822,
         "pooled_diff_b_minus_a": 0.67501,
-        "pooled_z_score": 17.436
+        "pooled_se_conservative": 0.08859,
+        "pooled_z_conservative": 7.62,
+        "pooled_se_indep": 0.03871,
+        "pooled_z_indep": 17.436,
+        "pooled_z_score": 7.62,
+        "cross_budget_seed_shared": true
       },
       "min_margin_cell": {
         "budget_kb": "2KB",
@@ -390,7 +405,12 @@
         "mean_mvp_b": 3.11625,
         "mean_mvp_b_se": 0.0295,
         "pooled_diff_b_minus_a": 0.44895,
-        "pooled_z_score": 11.468
+        "pooled_se_conservative": 0.03915,
+        "pooled_z_conservative": 11.468,
+        "pooled_se_indep": 0.03915,
+        "pooled_z_indep": 11.468,
+        "pooled_z_score": 11.468,
+        "cross_budget_seed_shared": true
       },
       "dense_1e6_to_1e9": {
         "count": 4,
@@ -403,7 +423,12 @@
         "mean_mvp_b": 3.67667,
         "mean_mvp_b_se": 0.05763,
         "pooled_diff_b_minus_a": 0.64993,
-        "pooled_z_score": 8.599
+        "pooled_se_conservative": 0.07558,
+        "pooled_z_conservative": 8.599,
+        "pooled_se_indep": 0.07558,
+        "pooled_z_indep": 8.599,
+        "pooled_z_score": 8.599,
+        "cross_budget_seed_shared": true
       },
       "dense_all_ge_1e6": {
         "count": 8,
@@ -416,7 +441,12 @@
         "mean_mvp_b": 3.61634,
         "mean_mvp_b_se": 0.0405,
         "pooled_diff_b_minus_a": 0.5347,
-        "pooled_z_score": 9.962
+        "pooled_se_conservative": 0.05367,
+        "pooled_z_conservative": 9.962,
+        "pooled_se_indep": 0.05367,
+        "pooled_z_indep": 9.962,
+        "pooled_z_score": 9.962,
+        "cross_budget_seed_shared": true
       },
       "min_margin_cell": {
         "budget_kb": "4KB",
@@ -765,7 +795,12 @@
         "mean_mvp_b": 3.24581,
         "mean_mvp_b_se": 0.03099,
         "pooled_diff_b_minus_a": 0.57851,
-        "pooled_z_score": 14.361
+        "pooled_se_conservative": 0.04028,
+        "pooled_z_conservative": 14.361,
+        "pooled_se_indep": 0.04028,
+        "pooled_z_indep": 14.361,
+        "pooled_z_score": 14.361,
+        "cross_budget_seed_shared": true
       },
       "dense_1e6_to_1e9": {
         "count": 4,
@@ -778,7 +813,12 @@
         "mean_mvp_b": 3.82325,
         "mean_mvp_b_se": 0.06014,
         "pooled_diff_b_minus_a": 0.79651,
-        "pooled_z_score": 10.276
+        "pooled_se_conservative": 0.07751,
+        "pooled_z_conservative": 10.276,
+        "pooled_se_indep": 0.07751,
+        "pooled_z_indep": 10.276,
+        "pooled_z_score": 10.276,
+        "cross_budget_seed_shared": true
       },
       "dense_all_ge_1e6": {
         "count": 8,
@@ -791,7 +831,12 @@
         "mean_mvp_b": 3.76997,
         "mean_mvp_b_se": 0.04208,
         "pooled_diff_b_minus_a": 0.68833,
-        "pooled_z_score": 12.544
+        "pooled_se_conservative": 0.05487,
+        "pooled_z_conservative": 12.544,
+        "pooled_se_indep": 0.05487,
+        "pooled_z_indep": 12.544,
+        "pooled_z_score": 12.544,
+        "cross_budget_seed_shared": true
       },
       "min_margin_cell": {
         "budget_kb": "4KB",
@@ -1691,323 +1736,19 @@
       }
     },
     "hash4j_java": {
-      "found": true,
-      "file": "BenchHash4j.java",
-      "line_count": 457,
-      "matches": {
-        "hash_item": [
-          {
-            "line": 28,
-            "text": "private static long hashItem(long key, long seed) {"
-          },
-          {
-            "line": 176,
-            "text": "ull.add(hashItem(i, sUll));"
-          },
-          {
-            "line": 177,
-            "text": "hll.add(hashItem(i, sHll));"
-          },
-          {
-            "line": 218,
-            "text": "long h = hashItem(i, seed);"
-          },
-          {
-            "line": 306,
-            "text": "long h = hashItem(x, seed);"
-          }
-        ],
-        "sketch_ctors": [
-          {
-            "line": 159,
-            "text": "int ullBytes = UltraLogLog.create(p).getState().length;"
-          },
-          {
-            "line": 160,
-            "text": "int hllBytes = HyperLogLog.create(p).getState().length;"
-          },
-          {
-            "line": 173,
-            "text": "UltraLogLog ull = UltraLogLog.create(p);"
-          },
-          {
-            "line": 174,
-            "text": "HyperLogLog hll = HyperLogLog.create(p);"
-          },
-          {
-            "line": 212,
-            "text": "UltraLogLog uAcc = UltraLogLog.create(p);"
-          },
-          {
-            "line": 213,
-            "text": "HyperLogLog hAcc = HyperLogLog.create(p);"
-          },
-          {
-            "line": 215,
-            "text": "UltraLogLog uPart = UltraLogLog.create(p);"
-          },
-          {
-            "line": 216,
-            "text": "HyperLogLog hPart = HyperLogLog.create(p);"
-          },
-          {
-            "line": 303,
-            "text": "UltraLogLog ull = UltraLogLog.create(p);"
-          },
-          {
-            "line": 304,
-            "text": "HyperLogLog hll = HyperLogLog.create(p);"
-          },
-          {
-            "line": 329,
-            "text": "UltraLogLog wu = UltraLogLog.create(12);"
-          },
-          {
-            "line": 330,
-            "text": "HyperLogLog wh = HyperLogLog.create(12);"
-          },
-          {
-            "line": 338,
-            "text": "wu.add(UltraLogLog.create(12));"
-          },
-          {
-            "line": 339,
-            "text": "wh.add(HyperLogLog.create(12));"
-          },
-          {
-            "line": 346,
-            "text": "UltraLogLog ua = UltraLogLog.create(p);"
-          },
-          {
-            "line": 347,
-            "text": "UltraLogLog ub = UltraLogLog.create(p);"
-          },
-          {
-            "line": 386,
-            "text": "HyperLogLog ha = HyperLogLog.create(p);"
-          },
-          {
-            "line": 387,
-            "text": "HyperLogLog hb = HyperLogLog.create(p);"
-          }
-        ],
-        "estimators": [
-          {
-            "line": 179,
-            "text": "eUllDef[t] = (ull.getDistinctCountEstimate() - nf) / nf;"
-          },
-          {
-            "line": 180,
-            "text": "eUllMl[t]  = (ull.getDistinctCountEstimate(UltraLogLog.MAXIMUM_LIKELIHOOD_ESTIMATOR) - nf) / nf;"
-          },
-          {
-            "line": 181,
-            "text": "eHllDef[t] = (hll.getDistinctCountEstimate() - nf) / nf;"
-          },
-          {
-            "line": 182,
-            "text": "eHllMl[t]  = (hll.getDistinctCountEstimate(HyperLogLog.MAXIMUM_LIKELIHOOD_ESTIMATOR) - nf) / nf;"
-          },
-          {
-            "line": 228,
-            "text": "eUllDef[t] = (uAcc.getDistinctCountEstimate() - nf) / nf;"
-          },
-          {
-            "line": 229,
-            "text": "eUllMl[t]  = (uAcc.getDistinctCountEstimate(UltraLogLog.MAXIMUM_LIKELIHOOD_ESTIMATOR) - nf) / nf;"
-          },
-          {
-            "line": 230,
-            "text": "eHllDef[t] = (hAcc.getDistinctCountEstimate() - nf) / nf;"
-          },
-          {
-            "line": 231,
-            "text": "eHllMl[t]  = (hAcc.getDistinctCountEstimate(HyperLogLog.MAXIMUM_LIKELIHOOD_ESTIMATOR) - nf) / nf;"
-          },
-          {
-            "line": 312,
-            "text": "eUllDef[s] = (ull.getDistinctCountEstimate() - tdf) / tdf;"
-          },
-          {
-            "line": 313,
-            "text": "eUllMl[s]  = (ull.getDistinctCountEstimate(UltraLogLog.MAXIMUM_LIKELIHOOD_ESTIMATOR) - tdf) / tdf;"
-          },
-          {
-            "line": 314,
-            "text": "eHllDef[s] = (hll.getDistinctCountEstimate() - tdf) / tdf;"
-          },
-          {
-            "line": 340,
-            "text": "sink += wu.getDistinctCountEstimate() + wu.getDistinctCountEstimate(UltraLogLog.MAXIMUM_LIKELIHOOD_ESTIMATOR);"
-          },
-          {
-            "line": 341,
-            "text": "sink += wh.getDistinctCountEstimate() + wh.getDistinctCountEstimate(HyperLogLog.MAXIMUM_LIKELIHOOD_ESTIMATOR);"
-          },
-          {
-            "line": 373,
-            "text": "for (int k = 0; k < 2000; k++) sink += ua.getDistinctCountEstimate();"
-          },
-          {
-            "line": 378,
-            "text": "for (int k = 0; k < 2000; k++) sink += ua.getDistinctCountEstimate(UltraLogLog.MAXIMUM_LIKELIHOOD_ESTIMATOR);"
-          },
-          {
-            "line": 411,
-            "text": "for (int k = 0; k < 2000; k++) sink += ha.getDistinctCountEstimate();"
-          },
-          {
-            "line": 416,
-            "text": "for (int k = 0; k < 2000; k++) sink += ha.getDistinctCountEstimate(HyperLogLog.MAXIMUM_LIKELIHOOD_ESTIMATOR);"
-          }
-        ],
-        "state_bytes": [
-          {
-            "line": 159,
-            "text": "int ullBytes = UltraLogLog.create(p).getState().length;"
-          },
-          {
-            "line": 160,
-            "text": "int hllBytes = HyperLogLog.create(p).getState().length;"
-          },
-          {
-            "line": 225,
-            "text": "ullBytes = uAcc.getState().length;"
-          },
-          {
-            "line": 226,
-            "text": "hllBytes = hAcc.getState().length;"
-          },
-          {
-            "line": 310,
-            "text": "ullB = ull.getState().length;"
-          },
-          {
-            "line": 311,
-            "text": "hllB = hll.getState().length;"
-          },
-          {
-            "line": 383,
-            "text": "p, ua.getState().length, arch, ullUpdNs, mergeSamples[4], estFgraUs, estMlUs));"
-          },
-          {
-            "line": 421,
-            "text": "p, ha.getState().length, arch, hllUpdNs, mergeSamples[4], hestDefUs, hestMlUs));"
-          }
-        ],
-        "merge_calls": [
-          {
-            "line": 176,
-            "text": "ull.add(hashItem(i, sUll));"
-          },
-          {
-            "line": 177,
-            "text": "hll.add(hashItem(i, sHll));"
-          },
-          {
-            "line": 219,
-            "text": "uPart.add(h);"
-          },
-          {
-            "line": 220,
-            "text": "hPart.add(h);"
-          },
-          {
-            "line": 222,
-            "text": "uAcc.add(uPart);"
-          },
-          {
-            "line": 223,
-            "text": "hAcc.add(hPart);"
-          },
-          {
-            "line": 249,
-            "text": "names.add(\"Synthetic_Uniform_2M\"); streams.add(unif); distincts.add(2_000_000L);"
-          },
-          {
-            "line": 256,
-            "text": "names.add(nm); streams.add(z); distincts.add(d);"
-          },
-          {
-            "line": 261,
-            "text": "names.add(\"HighDup_5M_10kDistinct\"); streams.add(hd); distincts.add(10_000L);"
-          },
-          {
-            "line": 267,
-            "text": "names.add(\"SNAP_webGoogle_Edges\"); streams.add(s); distincts.add(countDistinctSorted(s, s.length));"
-          },
-          {
-            "line": 272,
-            "text": "names.add(\"SNAP_citPatents_Edges\"); streams.add(s); distincts.add(countDistinctSorted(s, s.length));"
-          },
-          {
-            "line": 277,
-            "text": "names.add(\"NCBI_Ecoli_K12_31mers\"); streams.add(s); distincts.add(countDistinctSorted(s, s.length));"
-          },
-          {
-            "line": 307,
-            "text": "ull.add(h);"
-          },
-          {
-            "line": 308,
-            "text": "hll.add(h);"
-          },
-          {
-            "line": 334,
-            "text": "wu.add(h);"
-          },
-          {
-            "line": 335,
-            "text": "wh.add(h);"
-          },
-          {
-            "line": 338,
-            "text": "wu.add(UltraLogLog.create(12));"
-          },
-          {
-            "line": 339,
-            "text": "wh.add(HyperLogLog.create(12));"
-          },
-          {
-            "line": 349,
-            "text": "ua.add(splitmix64(i ^ 0x5555));"
-          },
-          {
-            "line": 350,
-            "text": "ub.add(splitmix64(i ^ 0xAAAA));"
-          },
-          {
-            "line": 356,
-            "text": "for (long i = 0; i < 2_000_000L; i++) ua.add(splitmix64(base + i));"
-          },
-          {
-            "line": 366,
-            "text": "for (int k = 0; k < 200; k++) ua.add(ub);"
-          },
-          {
-            "line": 389,
-            "text": "ha.add(splitmix64(i ^ 0x6666));"
-          },
-          {
-            "line": 390,
-            "text": "hb.add(splitmix64(i ^ 0xBBBB));"
-          },
-          {
-            "line": 395,
-            "text": "for (long i = 0; i < 2_000_000L; i++) ha.add(splitmix64(base + i));"
-          },
-          {
-            "line": 404,
-            "text": "for (int k = 0; k < 200; k++) ha.add(hb);"
-          }
-        ]
-      }
+      "found": false,
+      "file": "BenchHash4j.java"
+    },
+    "mixer_provenance": {
+      "rust_mixer": "wyhash64_2x_wymix",
+      "cpp_and_java_wrapper_mixer": "splitmix64",
+      "hash4j_java_source_present": false
     },
     "checks": {
       "cpc_uses_default_seed_and_tracked_alloc": true,
       "hll4_dyn_vs_full_both_benchmarked": true,
-      "hash4j_reports_both_default_fgra_and_mle": true,
-      "consistent_64bit_splitmix_mixer_across_rust_cpp_java": true
+      "cpp_wrappers_present_and_audited": true,
+      "hash4j_reports_both_default_fgra_and_mle": true
     }
   }
 }

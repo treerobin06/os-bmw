@@ -97,11 +97,23 @@ def audit_pair_cells(
             return {"count": 0}
         mean_a = sum(x["mvp_a"] for x in sub) / len(sub)
         mean_b = sum(x["mvp_b"] for x in sub) / len(sub)
-        # Across independent cells, Var(mean) = sum(se_i^2) / K^2
-        se_mean_a = math.sqrt(sum(x["mvp_a_se"] ** 2 for x in sub)) / len(sub)
-        se_mean_b = math.sqrt(sum(x["mvp_b_se"] ** 2 for x in sub)) / len(sub)
-        comb = math.hypot(se_mean_a, se_mean_b)
-        z_pool = (mean_b - mean_a) / comb if comb > 0 else None
+        diff = mean_b - mean_a
+        # Independent-cells reference SE (understates SE when budgets share RNG seeds per cardinality)
+        se_mean_a_indep = math.sqrt(sum(x["mvp_a_se"] ** 2 for x in sub)) / len(sub)
+        se_mean_b_indep = math.sqrt(sum(x["mvp_b_se"] ** 2 for x in sub)) / len(sub)
+        comb_indep = math.hypot(se_mean_a_indep, se_mean_b_indep)
+        z_pool_indep = diff / comb_indep if comb_indep > 0 else None
+
+        # Correlation-safe upper-bound SE: sum SEs linearly across budgets within each cardinality
+        # (permits arbitrary cross-budget dependence on shared RNG prefixes), then combine independent
+        # cardinalities in quadrature.
+        by_card: Dict[str, List[Dict[str, Any]]] = {}
+        for x in sub:
+            by_card.setdefault(x["cardinality"], []).append(x)
+        se_mean_a_cons = math.sqrt(sum(sum(x["mvp_a_se"] for x in grp) ** 2 for grp in by_card.values())) / len(sub)
+        se_mean_b_cons = math.sqrt(sum(sum(x["mvp_b_se"] for x in grp) ** 2 for grp in by_card.values())) / len(sub)
+        comb_cons = math.hypot(se_mean_a_cons, se_mean_b_cons)
+        z_pool_cons = diff / comb_cons if comb_cons > 0 else None
         return {
             "count": len(sub),
             "point_wins_a": sum(1 for x in sub if x["a_beats_b_point"]),
@@ -109,11 +121,16 @@ def audit_pair_cells(
             "abs_z_lt_1_96_count": sum(1 for x in sub if x["abs_z_lt_1_96"]),
             "ci95_overlap_count": sum(1 for x in sub if x["ci95_overlap"]),
             "mean_mvp_a": round(mean_a, 5),
-            "mean_mvp_a_se": round(se_mean_a, 5),
+            "mean_mvp_a_se": round(se_mean_a_cons, 5),
             "mean_mvp_b": round(mean_b, 5),
-            "mean_mvp_b_se": round(se_mean_b, 5),
-            "pooled_diff_b_minus_a": round(mean_b - mean_a, 5),
-            "pooled_z_score": round(z_pool, 3) if z_pool is not None else None,
+            "mean_mvp_b_se": round(se_mean_b_cons, 5),
+            "pooled_diff_b_minus_a": round(diff, 5),
+            "pooled_se_conservative": round(comb_cons, 5),
+            "pooled_z_conservative": round(z_pool_cons, 3) if z_pool_cons is not None else None,
+            "pooled_se_indep": round(comb_indep, 5),
+            "pooled_z_indep": round(z_pool_indep, 3) if z_pool_indep is not None else None,
+            "pooled_z_score": round(z_pool_cons, 3) if z_pool_cons is not None else None,
+            "cross_budget_seed_shared": True,
         }
 
     dense_1e6_1e9 = [x for x in cells if 1e6 <= x["card_val"] <= 1e9]
@@ -165,7 +182,7 @@ def main() -> None:
     ap.add_argument(
         "--official-bench-dir",
         type=Path,
-        default=repo_root / "pilots" / "S1-osbmw-v2-solid" / "official_bench",
+        default=artifact_dir / "wrappers",
     )
     ap.add_argument(
         "--official-hash4j-dir",
@@ -267,6 +284,11 @@ def main() -> None:
             "datasketches_cpp": bench_cpp,
             "datasketches_real_cpp": bench_real_cpp,
             "hash4j_java": hash4j_java,
+            "mixer_provenance": {
+                "rust_mixer": "wyhash64_2x_wymix",
+                "cpp_and_java_wrapper_mixer": "splitmix64",
+                "hash4j_java_source_present": hash4j_java.get("found", False),
+            },
             "checks": {
                 "cpc_uses_default_seed_and_tracked_alloc": (
                     bench_cpp.get("found", False)
@@ -279,15 +301,17 @@ def main() -> None:
                     and any("Apache_HLL4_Full" in m["text"] and "true" in m["text"] for m in bench_cpp["matches"]["hll_ctor"])
                     and any("HLL_4" in m["text"] and "full_sz" in m["text"] for m in bench_cpp["matches"]["hll_ctor"])
                 ),
-                "hash4j_reports_both_default_fgra_and_mle": (
-                    hash4j_java.get("found", False)
-                    and any("MAXIMUM_LIKELIHOOD_ESTIMATOR" in m["text"] for m in hash4j_java["matches"]["estimators"])
-                    and any("getDistinctCountEstimate()" in m["text"] for m in hash4j_java["matches"]["estimators"])
-                ),
-                "consistent_64bit_splitmix_mixer_across_rust_cpp_java": (
+                "cpp_wrappers_present_and_audited": (
                     bench_cpp.get("found", False)
                     and bench_real_cpp.get("found", False)
-                    and hash4j_java.get("found", False)
+                ),
+                "hash4j_reports_both_default_fgra_and_mle": (
+                    (
+                        any("MAXIMUM_LIKELIHOOD_ESTIMATOR" in m["text"] for m in hash4j_java["matches"]["estimators"])
+                        and any("getDistinctCountEstimate()" in m["text"] for m in hash4j_java["matches"]["estimators"])
+                    )
+                    if hash4j_java.get("found", False)
+                    else any(r["estimator"] == "FGRA_Default" for r in h4j_pareto) and any(r["estimator"] == "MLE" for r in h4j_pareto)
                 ),
             },
         },

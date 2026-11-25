@@ -2488,7 +2488,15 @@ fn summarize_timings(runs: &[f64]) -> (f64, f64, f64, f64) {
 }
 
 async fn run_workload(spec: &WorkloadSpec, n_runs: usize, only_method: Option<&str>) -> Vec<BenchRow> {
-    let (cmp_partitions, stage_compare) = if spec.n_partitions == 1 {
+    let skip_stage_cmp = env::var("S1_SKIP_STAGE_CMP")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let (cmp_partitions, stage_compare) = if skip_stage_cmp {
+        (
+            if spec.n_partitions == 1 { 4usize } else { 1usize },
+            "checked_e0".to_string(),
+        )
+    } else if spec.n_partitions == 1 {
         (4usize, "p1_vs_p4".to_string())
     } else {
         (1usize, format!("p1_vs_p{}", spec.n_partitions))
@@ -2750,16 +2758,19 @@ async fn run_workload(spec: &WorkloadSpec, n_runs: usize, only_method: Option<&s
         }
 
         // Per-group stage-consistency verification on the exact same Arrow data with cmp_ctx
-        let cmp_df = cmp_ctx.sql(&sql).await.unwrap();
-        let cmp_batches = cmp_df.collect().await.unwrap();
-        let cmp_ests = extract_estimates(&cmp_batches, n_groups_actual, &fn_name);
-        drop(cmp_batches);
-
-        let stage_mismatch_groups = primary_ests
-            .iter()
-            .zip(cmp_ests.iter())
-            .filter(|(a, b)| a.to_bits() != b.to_bits())
-            .count();
+        let stage_mismatch_groups = if skip_stage_cmp {
+            0
+        } else {
+            let cmp_df = cmp_ctx.sql(&sql).await.unwrap();
+            let cmp_batches = cmp_df.collect().await.unwrap();
+            let cmp_ests = extract_estimates(&cmp_batches, n_groups_actual, &fn_name);
+            drop(cmp_batches);
+            primary_ests
+                .iter()
+                .zip(cmp_ests.iter())
+                .filter(|(a, b)| a.to_bits() != b.to_bits())
+                .count()
+        };
 
         let (median_s, iqr_s, ci95_lo_s, ci95_hi_s) = summarize_timings(&run_times);
         let n_seen = n_groups_actual as f64;
@@ -3087,8 +3098,22 @@ fn main() {
     let mut methods_csv: Option<String> = None;
     let mut supp_tsv_name: Option<String> = env::var("S1_SUPP_TSV").ok();
     let mut supp_append = false;
-    let mut build_tag = env::var("S1_BUILD_TAG").unwrap_or_else(|_| "avx512".to_string());
+    let default_build_tag = if cfg!(all(
+        target_arch = "x86_64",
+        target_feature = "avx512bw",
+        target_feature = "avx512vbmi",
+        target_feature = "avx512vbmi2"
+    )) {
+        "avx512"
+    } else {
+        "scalar"
+    };
+    let mut build_tag = env::var("S1_BUILD_TAG").unwrap_or_else(|_| default_build_tag.to_string());
     let mut isolate = false;
+    let mut interleaved_epochs: usize = env::var("S1_INTERLEAVED_EPOCHS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
     let mut child_prefix: Option<PathBuf> = None;
     let mut runs_override: Option<usize> = env::var("S1_DF_RUNS").ok().and_then(|v| v.parse().ok());
     let mut w9_file: PathBuf = env::var("S1_W9_BIN")
@@ -3131,6 +3156,11 @@ fn main() {
             "--isolate" => {
                 isolate = true;
                 i += 1;
+            }
+            "--interleaved-epochs" => {
+                interleaved_epochs = args[i + 1].parse().expect("invalid --interleaved-epochs");
+                assert!(interleaved_epochs >= 1, "--interleaved-epochs must be >= 1");
+                i += 2;
             }
             "--child-prefix" => {
                 child_prefix = Some(PathBuf::from(&args[i + 1]));
@@ -3210,6 +3240,24 @@ fn main() {
         let stage_dir = out_dir.join(format!(".df_iso_{}", std::process::id()));
         fs::create_dir_all(&stage_dir).expect("create stage_dir");
 
+        let pre_spec_for_wm = |wm: &str| -> Option<WorkloadSpec> {
+            if smoke {
+                return None;
+            }
+            match wm {
+                "w1" => Some(WorkloadSpec { name: "W1_1T_16Kg_32M", n_groups: 16_384, total_rows: 32_000_000, n_partitions: 1, zipf_skew: false, repeat_passes: 1, external_bin: None }),
+                "w2" => Some(WorkloadSpec { name: "W2_8T_8Kg_40M", n_groups: 8_192, total_rows: 40_000_000, n_partitions: 8, zipf_skew: false, repeat_passes: 1, external_bin: None }),
+                "w3" => Some(WorkloadSpec { name: "W3_8T_Zipf_4Kg_40M", n_groups: 4_096, total_rows: 40_000_000, n_partitions: 8, zipf_skew: true, repeat_passes: 1, external_bin: None }),
+                "w4" => Some(WorkloadSpec { name: "W4_16T_16Kg_64M", n_groups: 16_384, total_rows: 64_000_000, n_partitions: 16, zipf_skew: false, repeat_passes: 1, external_bin: None }),
+                "w5" => Some(WorkloadSpec { name: "W5_32T_16Kg_64M", n_groups: 16_384, total_rows: 64_000_000, n_partitions: 32, zipf_skew: false, repeat_passes: 1, external_bin: None }),
+                "w6" => Some(WorkloadSpec { name: "W6_8T_65Kg_64M", n_groups: 65_536, total_rows: 64_000_000, n_partitions: 8, zipf_skew: false, repeat_passes: 1, external_bin: None }),
+                "w7" => Some(WorkloadSpec { name: "W7_8T_128g_768M_Dense", n_groups: 128, total_rows: 64_000_000, n_partitions: 8, zipf_skew: false, repeat_passes: 1, external_bin: None }),
+                "w8" => Some(WorkloadSpec { name: "W8_16T_256g_768M_Dense", n_groups: 256, total_rows: 64_000_000, n_partitions: 16, zipf_skew: false, repeat_passes: 1, external_bin: None }),
+                "w5_64p" => Some(WorkloadSpec { name: "W5_64P_16Kg_64M_Skew", n_groups: 16_384, total_rows: 64_000_000, n_partitions: 64, zipf_skew: true, repeat_passes: 1, external_bin: None }),
+                _ => None,
+            }
+        };
+
         // Pre-materialize external table once for w10 so isolated children load from DRAM page cache in <0.5s!
         let mut temp_w10_bin: Option<PathBuf> = None;
         if sub_modes.contains(&"w10") && !smoke && env::var("S1_W10_BIN").is_err() {
@@ -3230,42 +3278,247 @@ fn main() {
 
         let mut tsv_lines: Vec<String> = Vec::new();
         let mut supp_lines: Vec<String> = Vec::new();
+        let mut epoch_lines: Vec<String> = Vec::new();
         let mut json_lines: Vec<String> = Vec::new();
 
         for &wm in &sub_modes {
-            println!("\n=== [Isolated Process Orchestrator] Running {} across {} methods ({} timed runs/method) ===", wm, sql_fns.len(), child_runs);
-            for &sql_fn in &sql_fns {
-                let prefix = stage_dir.join(format!("{}_{}", wm, sql_fn));
-                let mut cmd = Command::new(&exe);
-                cmd.args(["--mode", wm, "--only-method", sql_fn, "--runs", &child_runs.to_string(), "--build-tag", &build_tag, "--out"])
-                    .arg(&out_dir)
-                    .arg("--w9-file")
-                    .arg(&w9_file)
-                    .arg("--child-prefix")
-                    .arg(&prefix);
-                if let Some(ref w10p) = temp_w10_bin {
-                    cmd.env("S1_W10_BIN", w10p);
+            if interleaved_epochs <= 1 {
+                println!("\n=== [Isolated Process Orchestrator] Running {} across {} methods ({} timed runs/method) ===", wm, sql_fns.len(), child_runs);
+                for &sql_fn in &sql_fns {
+                    let prefix = stage_dir.join(format!("{}_{}", wm, sql_fn));
+                    let mut cmd = Command::new(&exe);
+                    cmd.args(["--mode", wm, "--only-method", sql_fn, "--runs", &child_runs.to_string(), "--build-tag", &build_tag, "--out"])
+                        .arg(&out_dir)
+                        .arg("--w9-file")
+                        .arg(&w9_file)
+                        .arg("--child-prefix")
+                        .arg(&prefix);
+                    if let Some(ref w10p) = temp_w10_bin {
+                        cmd.env("S1_W10_BIN", w10p);
+                    }
+                    if smoke {
+                        cmd.arg("--smoke");
+                    }
+                    let status = cmd.status().expect("spawn isolated child");
+                    assert!(status.success(), "Isolated child failed for {} / {}", wm, sql_fn);
+                    let t_line = fs::read_to_string(prefix.with_extension("tsv"))
+                        .expect("read child tsv")
+                        .trim()
+                        .to_string();
+                    let s_line = fs::read_to_string(prefix.with_extension("supp"))
+                        .expect("read child supp")
+                        .trim()
+                        .to_string();
+                    let j_line = fs::read_to_string(prefix.with_extension("json"))
+                        .expect("read child json")
+                        .trim()
+                        .to_string();
+                    tsv_lines.push(t_line);
+                    supp_lines.push(s_line);
+                    json_lines.push(j_line);
                 }
-                if smoke {
-                    cmd.arg("--smoke");
+            } else {
+                let temp_wl_bin = if wm != "w10" && env::var("S1_WORKLOAD_BIN").is_err() {
+                    if let Some(ref spec_pre) = pre_spec_for_wm(wm) {
+                        let p = stage_dir.join(format!("{}_cache.bin", wm));
+                        println!("\n[Orchestrator] Pre-generating {} base table to {:?} for interleaved epochs...", wm, p);
+                        save_external_table(spec_pre, &p);
+                        Some(p)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                println!(
+                    "\n=== [Interleaved Isolated Orchestrator] {} across {} methods x {} epochs (total {} timed runs/method, build_tag={}) ===",
+                    wm, sql_fns.len(), interleaved_epochs, child_runs, build_tag
+                );
+                let base_r = child_runs / interleaved_epochs;
+                let rem_r = child_runs % interleaved_epochs;
+                let mut per_method: Vec<Vec<(String, String)>> = vec![Vec::new(); sql_fns.len()];
+                for epoch in 0..interleaved_epochs {
+                    let r_e = (base_r + usize::from(epoch < rem_r)).max(1);
+                    let indices: Vec<usize> = if epoch % 2 == 0 {
+                        (0..sql_fns.len()).collect()
+                    } else {
+                        (0..sql_fns.len()).rev().collect()
+                    };
+                    println!("  --- Epoch {}/{} ({} runs/method, dir={}) ---", epoch + 1, interleaved_epochs, r_e, if epoch % 2 == 0 { "fwd" } else { "rev" });
+                    for &m_idx in &indices {
+                        let sql_fn = sql_fns[m_idx];
+                        let prefix = stage_dir.join(format!("{}_e{}_{}", wm, epoch, sql_fn));
+                        let mut cmd = Command::new(&exe);
+                        cmd.args(["--mode", wm, "--only-method", sql_fn, "--runs", &r_e.to_string(), "--build-tag", &build_tag, "--out"])
+                            .arg(&out_dir)
+                            .arg("--w9-file")
+                            .arg(&w9_file)
+                            .arg("--child-prefix")
+                            .arg(&prefix);
+                        if let Some(ref w10p) = temp_w10_bin {
+                            cmd.env("S1_W10_BIN", w10p);
+                        }
+                        if let Some(ref wlp) = temp_wl_bin {
+                            cmd.env("S1_WORKLOAD_BIN", wlp);
+                        }
+                        if smoke {
+                            cmd.arg("--smoke");
+                        }
+                        if epoch > 0 {
+                            cmd.env("S1_SKIP_STAGE_CMP", "1");
+                        }
+                        let status = cmd.status().expect("spawn isolated child");
+                        assert!(status.success(), "Isolated child failed for {} epoch {} / {}", wm, epoch, sql_fn);
+                        let s_line = fs::read_to_string(prefix.with_extension("supp")).expect("read child supp").trim().to_string();
+                        let r_line = fs::read_to_string(prefix.with_extension("raw")).expect("read child raw").trim().to_string();
+                        let raw_runs = r_line.split('\t').next().unwrap_or("");
+                        epoch_lines.push(format!("{}\t{}\t{}", epoch, s_line, raw_runs));
+                        per_method[m_idx].push((s_line, r_line));
+                    }
                 }
-                let status = cmd.status().expect("spawn isolated child");
-                assert!(status.success(), "Isolated child failed for {} / {}", wm, sql_fn);
-                let t_line = fs::read_to_string(prefix.with_extension("tsv"))
-                    .expect("read child tsv")
-                    .trim()
-                    .to_string();
-                let s_line = fs::read_to_string(prefix.with_extension("supp"))
-                    .expect("read child supp")
-                    .trim()
-                    .to_string();
-                let j_line = fs::read_to_string(prefix.with_extension("json"))
-                    .expect("read child json")
-                    .trim()
-                    .to_string();
-                tsv_lines.push(t_line);
-                supp_lines.push(s_line);
-                json_lines.push(j_line);
+                if let Some(ref wlp) = temp_wl_bin {
+                    let _ = fs::remove_file(wlp);
+                }
+
+                // Aggregate E epochs per method in canonical sql_fns order
+                for (m_idx, recs) in per_method.iter().enumerate() {
+                    let mut pooled_runs: Vec<f64> = Vec::new();
+                    let mut freq_meds: Vec<f64> = Vec::new();
+                    let mut freq_mins: Vec<f64> = Vec::new();
+                    let mut freq_maxs: Vec<f64> = Vec::new();
+                    let mut sum_upd = 0.0_f64;
+                    let mut sum_mrg = 0.0_f64;
+                    let mut sum_eval = 0.0_f64;
+                    let mut sum_state = 0.0_f64;
+                    let mut cnt_cpu = 0usize;
+                    let mut max_logical_mb = 0.0_f64;
+                    let mut max_vm_hwm = 0.0_f64;
+                    let mut max_over_tbl = 0.0_f64;
+                    let mut max_hwm_delta = 0.0_f64;
+                    let mut rss_before_at_max = 0.0_f64;
+                    let mut first_cols: Option<Vec<&str>> = None;
+
+                    for (s_line, r_line) in recs {
+                        let sc: Vec<&str> = s_line.split('\t').collect();
+                        let rc: Vec<&str> = r_line.split('\t').collect();
+                        assert!(sc.len() >= 36 && rc.len() >= 8, "unexpected child telemetry width for {} / {}", wm, sql_fns[m_idx]);
+                        if let Some(ref fc) = first_cols {
+                            if sql_fns[m_idx] != "avll_cd" {
+                                assert_eq!(sc[21], fc[21], "RMSE changed across epochs for {} / {}", wm, sql_fns[m_idx]);
+                                if sc[26] != "checked_e0" {
+                                    assert_eq!(sc[27], fc[27], "stage_mismatch_groups changed across epochs for {} / {}", wm, sql_fns[m_idx]);
+                                }
+                            }
+                        } else {
+                            first_cols = Some(sc.clone());
+                        }
+                        max_logical_mb = max_logical_mb.max(sc[7].parse::<f64>().unwrap());
+                        max_vm_hwm = max_vm_hwm.max(sc[12].parse::<f64>().unwrap());
+                        max_over_tbl = max_over_tbl.max(sc[13].parse::<f64>().unwrap());
+                        let hd = sc[14].parse::<f64>().unwrap();
+                        if hd >= max_hwm_delta {
+                            max_hwm_delta = hd;
+                            rss_before_at_max = sc[11].parse::<f64>().unwrap();
+                        }
+                        let mut epoch_runs: Vec<f64> = Vec::new();
+                        for tok in rc[0].split(',') {
+                            if !tok.is_empty() {
+                                epoch_runs.push(tok.parse::<f64>().unwrap());
+                            }
+                        }
+                        let w = epoch_runs.len();
+                        pooled_runs.extend(epoch_runs);
+                        let u: f64 = rc[1].parse().unwrap();
+                        if u.is_finite() {
+                            sum_upd += u * (w as f64);
+                            sum_mrg += rc[2].parse::<f64>().unwrap() * (w as f64);
+                            sum_eval += rc[3].parse::<f64>().unwrap() * (w as f64);
+                            sum_state += rc[4].parse::<f64>().unwrap() * (w as f64);
+                            cnt_cpu += w;
+                        }
+                        let fm: f64 = rc[5].parse().unwrap();
+                        if fm.is_finite() {
+                            freq_meds.push(fm);
+                            freq_mins.push(rc[6].parse().unwrap());
+                            freq_maxs.push(rc[7].parse().unwrap());
+                        }
+                    }
+
+                    let fc = first_cols.unwrap();
+                    let n_threads: usize = fc[1].parse().unwrap();
+                    let n_groups: usize = fc[2].parse().unwrap();
+                    let total_rows: usize = fc[3].parse().unwrap();
+                    let bytes_per_group: usize = fc[6].parse().unwrap();
+                    let rss_pre_table_mb: f64 = fc[9].parse().unwrap();
+                    let rss_post_table_mb: f64 = fc[10].parse().unwrap();
+                    let rel_bias_pct: f64 = fc[20].parse().unwrap();
+                    let rmse_pct: f64 = fc[21].parse().unwrap();
+                    let mvp_ram: f64 = fc[22].parse().unwrap();
+                    let final_dense_groups: usize = fc[23].parse().unwrap();
+                    let final_dense_frac: f64 = fc[24].parse().unwrap();
+                    let partial_dense_frac: f64 = fc[25].parse().unwrap();
+                    let stage_mismatch_groups: usize = fc[27].parse().unwrap();
+
+                    let (wall_median_s, wall_iqr_s, wall_ci95_lo_s, wall_ci95_hi_s) = summarize_timings(&pooled_runs);
+                    let throughput_mrows_s = (total_rows as f64 / 1e6) / wall_median_s;
+                    let (upd_ms, mrg_ms, eval_ms, state_ms) = if cnt_cpu > 0 {
+                        let d = cnt_cpu as f64;
+                        (sum_upd / d, sum_mrg / d, sum_eval / d, sum_state / d)
+                    } else {
+                        (f64::NAN, f64::NAN, f64::NAN, f64::NAN)
+                    };
+                    let (fmed, fmin, fmax) = if freq_meds.is_empty() {
+                        (f64::NAN, f64::NAN, f64::NAN)
+                    } else {
+                        freq_meds.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                        (
+                            freq_meds[freq_meds.len() / 2],
+                            freq_mins.into_iter().fold(f64::INFINITY, f64::min),
+                            freq_maxs.into_iter().fold(f64::NEG_INFINITY, f64::max),
+                        )
+                    };
+                    let row = BenchRow {
+                        workload: fc[0].to_string(),
+                        n_threads,
+                        n_groups,
+                        total_rows,
+                        method: fc[4].to_string(),
+                        sql_fn: fc[5].to_string(),
+                        bytes_per_group,
+                        logical_state_mb: max_logical_mb,
+                        logical_state_source: fc[8].to_string(),
+                        rss_pre_table_mb,
+                        rss_post_table_mb,
+                        rss_before_query_mb: rss_before_at_max,
+                        vm_hwm_peak_mb: max_vm_hwm,
+                        rss_peak_over_table_mb: max_over_tbl,
+                        rss_hwm_delta_mb: max_hwm_delta,
+                        wall_median_s,
+                        wall_iqr_s,
+                        wall_ci95_lo_s,
+                        wall_ci95_hi_s,
+                        wall_runs_s: pooled_runs,
+                        throughput_mrows_s,
+                        rel_bias_pct,
+                        rmse_pct,
+                        mvp_ram,
+                        final_dense_groups,
+                        final_dense_frac,
+                        partial_dense_frac,
+                        stage_compare: fc[26].to_string(),
+                        stage_mismatch_groups,
+                        upd_cpu_ms: upd_ms,
+                        mrg_cpu_ms: mrg_ms,
+                        eval_cpu_ms: eval_ms,
+                        state_cpu_ms: state_ms,
+                        freq_med_mhz: fmed,
+                        freq_min_mhz: fmin,
+                        freq_max_mhz: fmax,
+                    };
+                    tsv_lines.push(format!("{}\t{:.1}\t{}", format_row_tsv(&row), row.freq_med_mhz, build_tag));
+                    supp_lines.push(format_supp_row_tsv(&row, &build_tag));
+                    json_lines.push(format_row_json(&row));
+                }
             }
         }
         let _ = fs::remove_dir_all(&stage_dir);
@@ -3305,15 +3558,34 @@ fn main() {
         } else {
             out_dir.join("m4_datafusion_groupby.tsv")
         };
+        let tsv_header_line = if interleaved_epochs > 1 {
+            format!("{}\tfreq_med_mhz\tbuild_tag", TSV_HEADER)
+        } else {
+            TSV_HEADER.to_string()
+        };
         let mut tsv = if append_mode && tsv_path.exists() {
             OpenOptions::new().append(true).open(&tsv_path).unwrap()
         } else {
             let mut f = File::create(&tsv_path).unwrap();
-            writeln!(f, "{}", TSV_HEADER).unwrap();
+            writeln!(f, "{}", tsv_header_line).unwrap();
             f
         };
         for l in &tsv_lines {
             writeln!(tsv, "{}", l).unwrap();
+        }
+        if interleaved_epochs > 1 && is_v5 && !epoch_lines.is_empty() {
+            let ep_path = out_dir.join("m4_datafusion_v5_hardened_epochs.tsv");
+            let mut ef = File::create(&ep_path).unwrap();
+            writeln!(ef, "epoch\t{}\twall_runs_s", SUPP_TSV_HEADER).unwrap();
+            for l in &epoch_lines {
+                writeln!(ef, "{}", l).unwrap();
+            }
+            let sp_path = out_dir.join("m4_datafusion_v5_hardened_supp.tsv");
+            let mut sf = File::create(&sp_path).unwrap();
+            writeln!(sf, "{}", SUPP_TSV_HEADER).unwrap();
+            for l in &supp_lines {
+                writeln!(sf, "{}", l).unwrap();
+            }
         }
         let json_name = match mode.as_str() {
             "single" | "w1" => "m4_datafusion_single.json",
@@ -3329,8 +3601,8 @@ fn main() {
         writeln!(jf, "{{").unwrap();
         writeln!(
             jf,
-            "  \"engine\": \"Apache DataFusion 55.3.0\", \"mode\": \"{}\", \"isolated_per_method\": true, \"timed_runs\": {},",
-            mode, child_runs
+            "  \"engine\": \"Apache DataFusion 55.3.0\", \"mode\": \"{}\", \"isolated_per_method\": true, \"interleaved_epochs\": {}, \"build_tag\": \"{}\", \"timed_runs\": {},",
+            mode, interleaved_epochs, build_tag, child_runs
         )
         .unwrap();
         writeln!(jf, "  \"rows\": [").unwrap();
@@ -3355,6 +3627,7 @@ fn main() {
 
     let mut all_rows: Vec<BenchRow> = Vec::new();
     let append_mode = mode == "parallel";
+    let ext_wl = if smoke { None } else { env::var("S1_WORKLOAD_BIN").ok().map(PathBuf::from) };
 
     if mode == "single" || mode == "w1" || mode == "all" {
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -3379,7 +3652,7 @@ fn main() {
                 n_partitions: 1,
                 zipf_skew: false,
                 repeat_passes: 1,
-                external_bin: None,
+                external_bin: ext_wl.clone(),
             }
         };
         let rows = rt.block_on(run_workload(&w1, n_runs, only_method.as_deref()));
@@ -3422,7 +3695,7 @@ fn main() {
                     n_partitions: 8,
                     zipf_skew: false,
                     repeat_passes: 1,
-                    external_bin: None,
+                    external_bin: ext_wl.clone(),
                 },
                 WorkloadSpec {
                     name: "W3_8T_Zipf_4Kg_40M",
@@ -3431,7 +3704,7 @@ fn main() {
                     n_partitions: 8,
                     zipf_skew: true,
                     repeat_passes: 1,
-                    external_bin: None,
+                    external_bin: ext_wl.clone(),
                 },
             )
         };
@@ -3464,7 +3737,7 @@ fn main() {
                     n_partitions: 16,
                     zipf_skew: false,
                     repeat_passes: 1,
-                    external_bin: None,
+                    external_bin: ext_wl.clone(),
                 }
             });
         }
@@ -3487,7 +3760,7 @@ fn main() {
                     n_partitions: 32,
                     zipf_skew: false,
                     repeat_passes: 1,
-                    external_bin: None,
+                    external_bin: ext_wl.clone(),
                 }
             });
         }
@@ -3510,7 +3783,7 @@ fn main() {
                     n_partitions: 8,
                     zipf_skew: false,
                     repeat_passes: 1,
-                    external_bin: None,
+                    external_bin: ext_wl.clone(),
                 }
             });
         }
@@ -3533,7 +3806,7 @@ fn main() {
                     n_partitions: 8,
                     zipf_skew: false,
                     repeat_passes: 12,
-                    external_bin: None,
+                    external_bin: ext_wl.clone(),
                 }
             });
         }
@@ -3556,7 +3829,7 @@ fn main() {
                     n_partitions: 16,
                     zipf_skew: false,
                     repeat_passes: 12,
-                    external_bin: None,
+                    external_bin: ext_wl.clone(),
                 }
             });
         }
@@ -3572,7 +3845,7 @@ fn main() {
             });
         }
         if mode == "w10" {
-            let ext_w10 = env::var("S1_W10_BIN").ok().map(PathBuf::from);
+            let ext_w10 = env::var("S1_W10_BIN").ok().map(PathBuf::from).or_else(|| ext_wl.clone());
             specs.push(if smoke {
                 WorkloadSpec {
                     name: "W10_32T_2Kg_768M_DenseOOC",
@@ -3614,7 +3887,7 @@ fn main() {
                     n_partitions: 64,
                     zipf_skew: true,
                     repeat_passes: 1,
-                    external_bin: None,
+                    external_bin: ext_wl.clone(),
                 }
             });
         }
@@ -3633,6 +3906,19 @@ fn main() {
         fs::write(prefix.with_extension("tsv"), format!("{}\n", format_row_tsv(&all_rows[0]))).unwrap();
         fs::write(prefix.with_extension("supp"), format!("{}\n", format_supp_row_tsv(&all_rows[0], &build_tag))).unwrap();
         fs::write(prefix.with_extension("json"), format!("{}\n", format_row_json(&all_rows[0]))).unwrap();
+        let runs_csv: Vec<String> = all_rows[0].wall_runs_s.iter().map(|x| format!("{:.9}", x)).collect();
+        let raw_line = format!(
+            "{}\t{:.6}\t{:.6}\t{:.6}\t{:.6}\t{:.3}\t{:.3}\t{:.3}\n",
+            runs_csv.join(","),
+            all_rows[0].upd_cpu_ms,
+            all_rows[0].mrg_cpu_ms,
+            all_rows[0].eval_cpu_ms,
+            all_rows[0].state_cpu_ms,
+            all_rows[0].freq_med_mhz,
+            all_rows[0].freq_min_mhz,
+            all_rows[0].freq_max_mhz,
+        );
+        fs::write(prefix.with_extension("raw"), raw_line).unwrap();
         return;
     }
 

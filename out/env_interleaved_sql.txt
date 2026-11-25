@@ -1,0 +1,29 @@
+# Sanitized Execution Environment (5-Epoch Interleaved DataFusion SQL Benchmark)
+
+CPU Model: Intel(R) Xeon(R) Gold 6430 (Sapphire Rapids)
+Architecture: x86_64
+Host Topology: 2 NUMA sockets, 32 physical cores/socket, 2 threads/core (128 logical CPUs total)
+Cache Hierarchy:
+  L1d: 3 MiB (64 instances)
+  L1i: 2 MiB (64 instances)
+  L2: 128 MiB (64 instances)
+  L3: 60 MiB/socket (120 MiB total, 2 instances)
+Execution Isolation:
+  Single-socket batch cgroup allocation: 48 logical CPUs (24 physical cores + 24 SMT siblings on Socket 0)
+  NUMA memory binding: single local socket (--membind=0)
+  Memory cgroup limit: 64 GiB (host DRAM: 247 GiB)
+Frequency Governor & Telemetry:
+  CPUFreq scaling_governor: performance
+  Measured active per-run frequency across all 108 benchmark rows (S1_CPU_FREQ_LOG=1):
+    freq_med_mhz range: 1071.1 - 1822.7 MHz (median 1459.4 MHz)
+    observed min/max sample range: 837.4 - 2600.1 MHz
+ISA / AVX-512 Flags:
+  avx512f avx512dq avx512ifma avx512cd avx512bw avx512vl avx512vbmi avx512_vbmi2 avx512_vnni avx512_bitalg avx512_vpopcntdq avx512_bf16 avx512_fp16 avx_vnni bmi1 bmi2 adx sha_ni gfni vaes vpclmulqdq
+OS / Kernel / Toolchain:
+  Kernel: Linux 7.0.0-27-generic
+  glibc: Ubuntu GLIBC 2.43-2ubuntu2.7 (2.43)
+  Compiler: rustc 1.100.0 (0ef1bc386 2026-11-09)
+  Rust Build Flags: RUSTFLAGS="-C target-cpu=native" (build_tag=avx512)
+  SQL Engine: Apache DataFusion 55.3.0
+Protocol:
+  --mode v5_hardened --interleaved-epochs 5 --runs 11 (11 timed runs/method across 5 interleaved fwd/rev epochs, per-method isolated child processes, zero cross-method RSS retention)

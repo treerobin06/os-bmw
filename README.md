@@ -11,12 +11,12 @@ Reproducibility artifact for **OS-BMW** (*PVLDB Vol. 20 / VLDB 2027 Research Tra
 │   ├── Cargo.lock
 │   ├── scripts/env_info.sh
 │   └── src/
-│       ├── lib.rs         # 29 core unit tests (semilattice laws, exact-semilattice CPC two-shard merge,
+│       ├── lib.rs         # 31 core unit tests (semilattice laws + 64^3 associativity, exact-semilattice CPC merge,
 │       │                  #   AVLL exact-mod preimage extreme-state check at 2^63-2^64 [1,500 tr.,
 │       │                  #   prefilled to avoid historical clamping], lossless HBS, 128b ref-vs-inplace,
-│       │                  #   PMF, MLE, Rank wire codec, 2x-reducibility, release k>=2 & flat-slice bounds,
-│       │                  #   AVX-512 vs. forced-scalar byte parity, filtered ELL/ULL equivalence,
-│       │                  #   ULL-FGRA unbiasedness & large-range bounds via test_ull_fgra_estimator_unbiased_and_bounds)
+│       │                  #   PMF, MLE, Rank wire codec, 2x-reducibility, release k>=2 & flat-slice/from_bytes
+│       │                  #   anchor+sentinel bounds, Chunk b=2.05 non-halving 64b witness, AVX-512 vs scalar
+│       │                  #   byte parity, filtered ELL/ULL equivalence, ULL-FGRA estimator bounds)
 │       ├── osbmw_inplace.rs
 │       ├── osbmw_rank.rs
 │       ├── osbmw_ref.rs
@@ -31,23 +31,26 @@ Reproducibility artifact for **OS-BMW** (*PVLDB Vol. 20 / VLDB 2027 Research Tra
 │   ├── Cargo.lock
 │   └── src/main.rs        # 4 tests (0x00..=0xFF symmetric Sl+Sp wire framing, malformed frames,
 │                          #   W7/W8 M_(24)>8 truncation, sparse->dense promotion & 95% CI summary)
-├── out/                   # Complete raw TSV/JSON measurements backing all tables & figures (42 files total)
+├── wrappers/              # Archived C++ DataSketches benchmark wrappers (uses SplitMix64 seeding; Rust uses 2x-wymix wyhash64)
+├── out/                   # Complete raw TSV/JSON measurements backing all tables & figures
 ├── scripts/
 │   ├── verify_proofs.py                    # Exact exhaustive/numerical verification (Theorems 1-3 + §8 wire-ranking bound)
 │   ├── reconcile_pmf_and_rank.py           # Independent Python PMF, Fisher/FiSh, and 1,277 B rank codec audit
 │   ├── prepare_w9_clickbench.py            # Deterministic ClickBench hits_0..31.parquet -> w9_clickbench.bin + SHA256
-│   ├── audit_closest_cells_and_wrappers.py # Pooled sweep z-scores & C++/Java wrapper parity audit
+│   ├── audit_closest_cells_and_wrappers.py # Correlation-safe pooled sweep z-scores & wrapper parity audit
 │   ├── dump_protocol_and_constants.py      # Extracts & verifies (--verify) out/m5_protocol_and_constants.json
-│   └── build_tables_and_figs.py            # Rebuilds 9 LaTeX files (8 artifact tables + metrics_macros.tex) & 4 PDF figures
-├── reproduce.sh           # One-command offline clean-room verification (34/34 Rust tests [29/29 lib + 1/1 martingale + 4/4 DataFusion] + 4 proof checks + m5 verify + tables/figs)
+│   ├── build_story_macros.py               # Emits story_macros.tex directly from out/
+│   ├── build_story_tables.py               # Emits all 5 manuscript LaTeX tables directly from out/
+│   └── build_story_figs.py                 # Emits all 4 vector manuscript PDF figures directly from out/
+├── reproduce.sh           # One-command offline clean-room verification (36/36 Rust tests [31/31 lib + 1/1 martingale + 4/4 DataFusion] + proofs + m5/E-11 verify + macros/tables/figs)
 └── LICENSE                # MIT License
 ```
 
 ## Requirements
 
-- **Rust toolchain**: `rustc` / `cargo` **1.94+** (enforced via `rust-version = "1.94"` in both `Cargo.toml` files; required by `Cargo.lock` lockfile v4 and DataFusion 55.3 dependencies; tested on `rustc 1.95.0` macOS arm64 and `rustc 1.100.0` Linux x86-64).
-- **Python**: Python 3.9+ with **`numpy`** and **`matplotlib`** (`scripts/verify_proofs.py`, `scripts/reconcile_pmf_and_rank.py`, and `scripts/prepare_w9_clickbench.py --verify/--self-test` require `numpy`; `scripts/build_tables_and_figs.py` requires `numpy` and `matplotlib`; `pyarrow` is only needed when converting raw ClickBench `.parquet` shards via `scripts/prepare_w9_clickbench.py`).
-- **Hardware**: All 34/34 Rust tests (29/29 lib + 1/1 martingale + 4/4 DataFusion), theorem proofs, protocol-constant verification, and table/figure generation run portably on any x86-64 or ARM64 CPU. Full SIMD microbenchmarks (`s1_v2_bench_sys`, `s1_v2_256b_mulshift`, `s1_v2_bench_supp`, `s1_v2_datafusion`) use AVX-512BW/VBMI/VBMI2 when compiled with `RUSTFLAGS="-C target-cpu=native"` on AVX-512 hosts and fall back cleanly to portable scalar kernels elsewhere.
+- **Rust toolchain**: `rustc` / `cargo` **1.94+** (enforced via `rust-version = "1.94"` in both `Cargo.toml` files; required by `Cargo.lock` lockfile v4 and DataFusion 55.3 dependencies; tested on `rustc 1.95.0` macOS arm64 and `rustc 1.100.0` Linux x86-64). Running offline builds requires a pre-populated local Cargo crate cache (e.g. from a prior networked build or vendored `CARGO_HOME`); `reproduce.sh` passes `--offline` to Cargo.
+- **Python**: Python 3.9+ with **`numpy`** and **`matplotlib`** (`scripts/verify_proofs.py`, `scripts/reconcile_pmf_and_rank.py`, and `scripts/prepare_w9_clickbench.py --verify/--self-test` require `numpy`; `scripts/build_story_figs.py` requires `numpy` and `matplotlib`; `pyarrow` is only needed when converting raw ClickBench `.parquet` shards via `scripts/prepare_w9_clickbench.py`).
+- **Hardware**: All 36/36 Rust tests (31/31 lib + 1/1 martingale + 4/4 DataFusion), theorem proofs, protocol-constant verification, and table/figure generation run portably on any x86-64 or ARM64 CPU. Full SIMD microbenchmarks (`s1_v2_bench_sys`, `s1_v2_256b_mulshift`, `s1_v2_bench_supp`, `s1_v2_datafusion`) use AVX-512BW/VBMI/VBMI2 when compiled with `RUSTFLAGS="-C target-cpu=native"` on AVX-512 hosts and fall back cleanly to portable scalar kernels elsewhere. All microbenchmarks and the 5-epoch interleaved DataFusion SQL evaluation ran on `Intel(R) Xeon(R) Gold 6430` (Sapphire Rapids; 60 MiB L3/socket; SQL run under single-socket 48-CPU batch cgroup allocation with `--membind=0`, `performance` governor, median run frequencies `1,071.1–1,822.7 MHz`; see `out/env_interleaved_sql.txt`). Note: Rust sketches/baselines share `wyhash64` (`2x-wymix` in `hash.rs`), whereas C++ DataSketches (`wrappers/`) and Java `hash4j` benchmark harnesses used `SplitMix64` over `(item ^ seed)`.
 
 ## Quick Verification (`reproduce.sh`)
 
@@ -64,12 +67,12 @@ On x86-64 hosts with AVX-512, enable native SIMD instructions:
 RUSTFLAGS="-C target-cpu=native" ./reproduce.sh
 ```
 
-Expected verification summary (**34/34 Rust tests** = `29/29` lib + `1/1` martingale + `4/4` DataFusion):
-1. `s1_v2_rust --lib`: **29/29 passed** (exhaustive 512×512 ordered-pair commutativity/idempotence/merge checks + independent random-triple associativity checks, floor-clamped isomorphism, exact-semilattice local `CPC` two-shard `lgK=8` and 8-shard merge regression, `AVLL` `h % m` joint preimages, uniform `[2^20, 2^21)` 5,632-bucket coverage, extreme-state `AVLL` estimator check using exact modulo preimage counts $C(r,k)$ under an unclamped Poisson likelihood [approximate after historical old-anchor clamping; 1,500 trials prefilled at saturated lower levels to avoid historical clamping, bias within SE, $|\mathrm{bias}| \le 0.10\%$ at $2^{63}$ and $2^{64}$; main direct-stream sweeps stop at $n \le 10^6$], lossless Karppa 2026 `HBS` register/merge/wire equivalence incl. empty `p=6` round-trip, 128-bit `osbmw_ref` vs. `osbmw_inplace` bit-identical equivalence, flat-slice `ELL`/`ULL` equivalence, exact 64-bit preimage PMF closure, dyadic 2×-reducibility, safeguarded Newton-Raphson MLE, 1,277 B combinatorial rank codec round-trip, single-64-bit `max_cap` construction/downsize/MLE consistency, `256B` `MulShift384`/`Div3`/`Pow2` wire-mode isolation + deferred interop, `Chunk` 64-bit/128-bit wire-mode isolation, `test_r22_k1_rejected_and_flat_slice_bounds_checked`, `test_direct_simd_vs_scalar_byte_parity`, `test_ell24_and_ull_filtered_exact_equivalence`, and `test_ull_fgra_estimator_unbiased_and_bounds` [verifying our Rust port of Dynatrace hash4j 0.22.0 `OptimalFGRAEstimator` on empty, moderate, and large-range register states]).
+Expected verification summary (**36/36 Rust tests** = `31/31` lib + `1/1` martingale + `4/4` DataFusion):
+1. `s1_v2_rust --lib`: **31/31 passed** (exhaustive 512×512 ordered-pair commutativity/idempotence/merge checks + 64³=262,144 associativity checks, floor-clamped isomorphism, exact-semilattice local `CPC` two-shard `lgK=8` and 8-shard merge regression, `AVLL` `h % m` joint preimages, uniform `[2^20, 2^21)` 5,632-bucket coverage, extreme-state `AVLL` estimator check using exact modulo preimage counts $C(r,k)$ under an unclamped Poisson likelihood [approximate after historical old-anchor clamping; 1,500 trials prefilled at saturated lower levels to avoid historical clamping, bias within SE, $|\mathrm{bias}| \le 0.10\%$ at $2^{63}$ and $2^{64}$; main direct-stream sweeps stop at $n \le 10^6$], lossless Karppa 2026 `HBS` register/merge/wire equivalence incl. empty `p=6` round-trip, 128-bit `osbmw_ref` vs. `osbmw_inplace` bit-identical equivalence, flat-slice `ELL`/`ULL` equivalence, exact 64-bit preimage PMF closure, dyadic 2×-reducibility, safeguarded Newton-Raphson MLE, 1,277 B combinatorial rank codec round-trip, single-64-bit `max_cap` construction/downsize/MLE consistency, `256B` `MulShift384`/`Div3`/`Pow2` wire-mode isolation + deferred interop, `Chunk` 64-bit/128-bit wire-mode isolation, `test_r22_k1_rejected_and_flat_slice_bounds_checked`, `test_direct_simd_vs_scalar_byte_parity`, `test_ell24_and_ull_filtered_exact_equivalence`, `test_ull_fgra_estimator_unbiased_and_bounds` [verifying our Rust port of Dynatrace hash4j 0.22.0 `OptimalFGRAEstimator` on empty, moderate, and large-range register states], `test_from_bytes_rejects_corrupt_anchor_and_overflow_sentinels`, and `test_chunk_b205_non_halving_witness_64bit`).
 2. `s1_v2_rust --bin s1_v2_equal_error_hip`: **1/1 passed** (`OsBmwMartingale` exact open-cell tracking across anchor promotions up to $n=10^6$).
 3. `s1_v2_datafusion`: **4/4 passed** (exhaustive `0x00..=0xFF` first-byte wire-framing test across all 5 symmetric `Slab+Sp` engines including `OS-BMW`, `ELL(2,24)`, and `ULL`, verifying `5B->9B` sparse append vs. bit-identical canonical dense projection and malformed-frame rejection, high-cardinality `W7`/`W8` $M_{(24)}>8$ truncation and estimate divergence vs. `ULL`, plus sparse→dense promotion counter and bootstrap 95% CI verification).
-4. `scripts/verify_proofs.py`, `scripts/prepare_w9_clickbench.py --self-test`, & `scripts/dump_protocol_and_constants.py --verify`: **4/4 proof checks passed** (`theorem_1`, `generalized_theorem_2`, `theorem_3`, `theorem_4`, writing `reproduced/proofs_verification.json`), deterministic ClickBench W9 binary converter/verifier self-test, and source-to-JSON consistency verification of `out/m5_protocol_and_constants.json`.
-5. `scripts/build_tables_and_figs.py`: Regenerates **9 LaTeX files** (`8` artifact tables + `metrics_macros.tex` in `reproduced/tables/*.tex`) and **4 PDF figures** (`reproduced/figures/*.pdf`) directly from `out/` (`42` raw TSV/JSON files).
+4. `scripts/verify_proofs.py`, `scripts/prepare_w9_clickbench.py --self-test`, `scripts/dump_protocol_and_constants.py --verify`, & `scripts/audit_closest_cells_and_wrappers.py`: **4/4 theorem checks passed** (`theorem_1`, `generalized_theorem_2`, `theorem_3`, `theorem_4`, writing `reproduced/proofs_verification.json`), deterministic ClickBench W9 binary converter/verifier self-test (`0/6` mismatches), source-to-JSON verification of `out/m5_protocol_and_constants.json`, and `4/4 True` wrapper/correlation-safe pooled $z$-score checks (`reproduced/m2_closest_cells_and_wrappers.json`).
+5. `scripts/build_story_{macros,tables,figs}.py`: Regenerates `story_macros.tex` (`443` macro keys), **5 manuscript LaTeX tables** (`v2_mc.tex`, `v2_multishard.tex`, `v2_micro.tex`, `v2_df.tex`, and supplementary `v2_supp.tex` in `reproduced/tables/*.tex`), and **4 vector PDF figures** (`fig_equal_byte_sweep.pdf`, `fig_ram_wire_pareto.pdf`, `fig_datafusion_scaling.pdf`, `fig_geometry_ablation.pdf` in `reproduced/figures/*.pdf`) directly from `out/` (`43` raw files).
 
 ### Standalone `verify_proofs.py` & `dump_protocol_and_constants.py` Usage
 
@@ -86,14 +89,15 @@ python3 scripts/dump_protocol_and_constants.py --verify
 python3 scripts/audit_closest_cells_and_wrappers.py --dest reproduced/m2_closest_cells_and_wrappers.json
 ```
 
-### Raw Measurements in `out/` (42 Files Total)
+### Raw Measurements in `out/` (43 Files Total)
 
-All 42 archived raw TSV/JSON files in `out/` back the manuscript's tables, figures, and supplementary ablations. In addition to the core M0–M4 sweeps, proof/reconciliation logs, official DataSketches/hash4j baselines, and earlier microbenchmarks/SQL diagnostics (37 files), `out/` includes 5 supplementary measurement and metadata files:
+All 43 archived raw TSV/JSON/env files in `out/` back the manuscript's tables, figures, and supplementary ablations. Alongside the core M0–M4 sweeps (where `out/m4_datafusion_v5_hardened.tsv` holds the 108-row, 5-epoch fwd/rev interleaved DataFusion SQL run via `--mode v5_hardened --interleaved-epochs 5 --runs 11` with `S1_CPU_FREQ_LOG=1`), proof/reconciliation logs, official DataSketches/hash4j baselines, and earlier microbenchmarks/SQL diagnostics (37 files), `out/` includes 6 supplementary measurement and metadata files:
+- `out/env_interleaved_sql.txt`: Sanitized `Intel(R) Xeon(R) Gold 6430` topology, 48-CPU single-socket batch cgroup allocation (`--membind=0`), `performance` governor frequency telemetry (`1,071.1–1,822.7 MHz` median run range), and 5-epoch interleaved SQL protocol record.
 - `out/m3_avx2_merge.tsv`: Non-AVX-512 x86-64 AVX2/portable-scalar merge latency (`s1_v2_bench_supp --mode non-avx512-merge`).
 - `out/m3_ull_fgra_micro.tsv`: Single-sketch $n=10^7$ estimation latency comparing `OS-BMW-5b(k24)` MLE, `ELL(2,24)` MLE, `ULL` MLE, and `ULL` FGRA (`s1_v2_bench_supp --mode ull-fgra-micro`).
 - `out/m4_scalar_sql.tsv`: Portable non-AVX-512 scalar-build Apache DataFusion 55.3 GROUP BY ablation on `W5`, `W6`, `W9`, and `W10` (`s1_v2_datafusion` built without AVX-512 flags using `--build-tag scalar`).
 - `out/m4_ull_fgra_ablation.tsv`: End-to-end Apache DataFusion 55.3 `ULL` MLE vs. `ULL-FGRA` (`ull_fgra_v3_cd`) vs. `OS-BMW-5b(k24,Slab+Sp)` and `ELL(2,24,Slab+Sp)` ablation across `W1`, `W3`, `W5`, `W6`, and `W9`.
-- `out/m5_protocol_and_constants.json`: Deterministic snapshot of solver tolerances, wire tags, sparse chunk geometry, bootstrap settings, hardware/toolchain versions, and test counts (`34/34`), verified by `scripts/dump_protocol_and_constants.py --verify`.
+- `out/m5_protocol_and_constants.json`: Deterministic snapshot of solver tolerances, wire tags, sparse chunk geometry, bootstrap settings, hardware/toolchain versions, and test counts (`36/36`), verified by `scripts/dump_protocol_and_constants.py --verify`.
 
 ## Preparing Real ClickBench Workload `W9` (`w9_clickbench.bin`)
 
@@ -142,8 +146,8 @@ python3 scripts/prepare_w9_clickbench.py --verify ./data/w9_clickbench.bin
 # M2 full accuracy sweep (optional SNAP graph directory via S1_DATA_DIR or 2nd CLI arg; defaults to ./data)
 (cd s1_v2_rust && RUSTFLAGS="-C target-cpu=native" cargo run --release --bin s1_v2_accuracy -- ../out ./data 8)
 
-# M4 Apache DataFusion 55.3 GROUP BY hardened 9-workload benchmark (W1-W9 x 12 engines, 11 repeats, isolated)
-(cd s1_v2_datafusion && RUSTFLAGS="-C target-cpu=native" cargo run --release -- --mode v5_hardened --isolate --runs 11 --w9-file ../data/w9_clickbench.bin --out ../out)
+# M4 Apache DataFusion 55.3 GROUP BY hardened 9-workload benchmark (W1-W9 x 12 engines, 5 interleaved epochs, 11 timed repeats, isolated)
+(cd s1_v2_datafusion && S1_CPU_FREQ_LOG=1 RUSTFLAGS="-C target-cpu=native" cargo run --release -- --mode v5_hardened --interleaved-epochs 5 --isolate --runs 11 --w9-file ../data/w9_clickbench.bin --out ../out)
 
 # M4 supplementary SQL ablations (portable scalar build & ULL-FGRA end-to-end estimator comparison)
 (cd s1_v2_datafusion && cargo run --release -- --mode w5 --isolate --runs 11 --build-tag scalar --methods osbmw5b_v3_cd,osbmw5b_cd,osbmw256_v3_cd,ell24_v3_cd --supp-tsv m4_scalar_sql.tsv --out ../out)
