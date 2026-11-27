@@ -64,7 +64,7 @@ PALETTE = {
     "DF_HLL": "#222222",          # near-black charcoal (DF HLL 16 KiB)
     # Distinct secondary accents for official libraries & dense bar pairs
     "Apache_HLL4": "#332288",     # indigo
-    "Hash4j_ULL": "#999933",      # olive
+    "Hash4j_ULL": "#6B6B00",      # dark olive (high-contrast in grayscale)
     "OS-BMW-5b-Dense": "#8FAADC", # light navy tint (paired with #1F4E79)
     "ELL24-Dense": "#F4A582",     # light vermilion tint (paired with #D55E00)
 }
@@ -112,6 +112,7 @@ def configure_style() -> None:
         "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
         "mathtext.fontset": "stix",
         "font.size": 8.9,
+        "hatch.linewidth": 0.45,
         "axes.titlesize": 9.4,
         "axes.titleweight": "normal",
         "axes.labelsize": 8.8,
@@ -541,8 +542,8 @@ def build_fig_ram_wire_pareto(out_dir: Path, fig_dir: Path) -> None:
     ax1.plot(
         [p[0] for p in h4_ull_pts], [p[1] for p in h4_ull_pts],
         label="Hash4j ULL (state)", color=PALETTE["Hash4j_ULL"], marker="d",
-        linestyle=":", linewidth=1.35, markersize=4.0, zorder=4,
-        markeredgewidth=0.4, markeredgecolor="white",
+        linestyle=":", linewidth=1.45, markersize=4.2, zorder=5,
+        markeredgewidth=0.55, markeredgecolor="#111111",
     )
 
     # Panel (b): Cold-Storage Wire Pareto
@@ -596,8 +597,8 @@ def build_fig_ram_wire_pareto(out_dir: Path, fig_dir: Path) -> None:
     ax2.plot(
         [p[0] for p in h4_ull_pts], [p[1] for p in h4_ull_pts],
         label="Hash4j ULL (state)", color=PALETTE["Hash4j_ULL"], marker="d",
-        linestyle=":", linewidth=1.35, markersize=4.0, zorder=4,
-        markeredgewidth=0.4, markeredgecolor="white",
+        linestyle=":", linewidth=1.45, markersize=4.2, zorder=5,
+        markeredgewidth=0.55, markeredgecolor="#111111",
     )
 
     # Clear compact note in Panel (b) empty lower-left whitespace for OS-BMW-Rank projection
@@ -660,13 +661,13 @@ def build_fig_ram_wire_pareto(out_dir: Path, fig_dir: Path) -> None:
         (2.0,  1150.0, 0.90, "center", "top"),
         (3.0, 15500.0, 0.93, "center", "top"),
         (3.8, 19200.0, 1.11, "center", "bottom"),
-        (6.4,  9800.0, 1.10, "center", "bottom"),
+        (6.4, 12800.0, 0.90, "center", "top"),
     ]
     iso_labels_b = [
         (2.0,  9200.0, 0.90, "center", "top"),
         (3.0, 15500.0, 0.93, "center", "top"),
         (3.8, 19200.0, 1.11, "center", "bottom"),
-        (6.4,  8800.0, 1.10, "center", "bottom"),
+        (6.4, 15500.0, 1.13, "center", "bottom"),
     ]
     for ax_t, specs in ((ax1, iso_labels_a), (ax2, iso_labels_b)):
         for mvp_c, x_pos, mult, ha_m, va_m in specs:
@@ -725,16 +726,16 @@ def build_fig_datafusion_scaling(out_dir: Path, fig_dir: Path) -> None:
     kavll = kib_for("AVLL(base56)")
     kdf = kib_for("DF-BuiltIn-HLL(16KB)")
 
-    # Exact 8 engines plotted in top bar panels (a)-(b)
+    # Exact 8 engines plotted in top bar panels (a)-(b) with redundant hatch coding for grayscale
     methods_bars = [
-        ("OS-BMW-5b(k24,Slab+Sp)",   f"OS-BMW {k5b} (Slab+Sp)",  PALETTE["OS-BMW-5b"]),
-        ("OS-BMW-5b-256B(Slab+Sp)",  f"OS-BMW {k256} (Slab+Sp)", PALETTE["OS-BMW-256B"]),
-        ("OS-BMW-5b(16blk,Slab+Sp)", f"OS-BMW {k16b} (Slab+Sp)", PALETTE["OS-BMW-16b"]),
-        ("ELL(2,24,Slab+Sp)",        f"ELL(2,24) ({kell}, Slab+Sp)", PALETTE["ELL(2,24)"]),
-        ("ULL(Slab+Sp)",             f"ULL ({kull}, Slab+Sp)",   PALETTE["ULL"]),
-        ("OS-BMW-5b(k24)",           f"OS-BMW {k5b} (Dense)",    PALETTE["OS-BMW-5b-Dense"]),
-        ("ELL(2,24)",                f"ELL(2,24) ({kell}, Dense)", PALETTE["ELL24-Dense"]),
-        ("DF-BuiltIn-HLL(16KB)",     f"DF HLL ({kdf})",          PALETTE["DF_HLL"]),
+        ("OS-BMW-5b(k24,Slab+Sp)",   f"OS-BMW {k5b} (Slab+Sp)",      PALETTE["OS-BMW-5b"],       "",     "white"),
+        ("OS-BMW-5b-256B(Slab+Sp)",  f"OS-BMW {k256} (Slab+Sp)",     PALETTE["OS-BMW-256B"],     "////", "white"),
+        ("OS-BMW-5b(16blk,Slab+Sp)", f"OS-BMW {k16b} (Slab+Sp)",     PALETTE["OS-BMW-16b"],      "....", "white"),
+        ("ELL(2,24,Slab+Sp)",        f"ELL(2,24) ({kell}, Slab+Sp)", PALETTE["ELL(2,24)"],       "----", "white"),
+        ("ULL(Slab+Sp)",             f"ULL ({kull}, Slab+Sp)",       PALETTE["ULL"],             "",     "#333333"),
+        ("OS-BMW-5b(k24)",           f"OS-BMW {k5b} (Dense)",        PALETTE["OS-BMW-5b-Dense"], "////", "#1F4E79"),
+        ("ELL(2,24)",                f"ELL(2,24) ({kell}, Dense)",   PALETTE["ELL24-Dense"],     "----", "#8C2D04"),
+        ("DF-BuiltIn-HLL(16KB)",     f"DF HLL ({kdf})",              PALETTE["DF_HLL"],          "xxxx", "#BBBBBB"),
     ]
 
     wl_order = [
@@ -762,7 +763,7 @@ def build_fig_datafusion_scaling(out_dir: Path, fig_dir: Path) -> None:
 
     # --- Panel (a): SQL Throughput (Med + 95% CI, W1-W9) ---
     max_thr_hi = 0.0
-    for idx, (m, lbl, col) in enumerate(methods_bars):
+    for idx, (m, lbl, col, ht, ec) in enumerate(methods_bars):
         vals, yerr_lo, yerr_hi = [], [], []
         for wl, _ in wl_order:
             r = by_wm[(wl, m)]
@@ -777,7 +778,7 @@ def build_fig_datafusion_scaling(out_dir: Path, fig_dir: Path) -> None:
         offset = (idx - (n_m - 1) / 2.0) * w
         ax1.bar(
             x + offset, vals, width=w, color=col, label=lbl,
-            edgecolor="white", linewidth=0.22,
+            hatch=ht, edgecolor=ec, linewidth=0.25,
             yerr=[yerr_lo, yerr_hi],
             error_kw={"elinewidth": 0.55, "capsize": 1.0, "ecolor": "#222222"},
             zorder=3,
@@ -793,14 +794,14 @@ def build_fig_datafusion_scaling(out_dir: Path, fig_dir: Path) -> None:
     # --- Panel (b): Peak Physical Memory Above Table (log MiB, ymax * 1.65 headroom) ---
     max_mem = 0.0
     min_mem = float("inf")
-    for idx, (m, _, col) in enumerate(methods_bars):
+    for idx, (m, _, col, ht, ec) in enumerate(methods_bars):
         vals = [fnum_req(by_wm[(wl, m)]["rss_peak_over_table_mb"]) for wl, _ in wl_order]
         max_mem = max(max_mem, max(vals))
         min_mem = min(min_mem, min(vals))
         offset = (idx - (n_m - 1) / 2.0) * w
         ax2.bar(
             x + offset, vals, width=w, color=col,
-            edgecolor="white", linewidth=0.22, zorder=3,
+            hatch=ht, edgecolor=ec, linewidth=0.25, zorder=3,
         )
 
     ax2.set_xticks(x)
@@ -911,7 +912,7 @@ def build_fig_datafusion_scaling(out_dir: Path, fig_dir: Path) -> None:
     w8_labels = {
         "DF-BuiltIn-HLL(16KB)":     (0.72,  980.0, "center", "bottom", True),
         "OS-BMW-5b(16blk,Slab+Sp)": (0.68,  515.0, "center", "top",    True),
-        "AVLL(base56)":             (0.89,  365.0, "center", "center", True),
+        "AVLL(base56)":             (0.84,  385.0, "center", "center", True),
         "OS-BMW-5b-256B(Slab+Sp)":  (1.14,  575.0, "center", "top",    True),
         "ELL(2,24,Slab+Sp)":        (0.91, 1300.0, "center", "bottom", True),
         "OS-BMW-5b(k24,Slab+Sp)":   (1.34,  960.0, "left",   "center", True),
